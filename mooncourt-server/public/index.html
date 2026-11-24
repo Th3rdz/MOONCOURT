@@ -1,0 +1,1156 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MOONCOURT — The Werewolf Society (Live Multi-Device)</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Thai:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      font-family: 'Noto Sans Thai', 'Inter', system-ui, -apple-system, sans-serif;
+      background: radial-gradient(circle at 50% 0%, #191536 0%, #0b0c18 48%, #070811 100%);
+      color: #f1f5f9;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+    .font-display { font-family: 'Cinzel', 'Noto Sans Thai', serif; }
+    .glass-card {
+      background: rgba(17, 19, 36, 0.84);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid rgba(165, 180, 252, 0.13);
+    }
+    .moon-glow { box-shadow: 0 0 42px rgba(245, 158, 11, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.08); }
+    .blood-glow { box-shadow: 0 0 38px rgba(225, 29, 72, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.08); }
+    .role-card-hidden { background: radial-gradient(circle at 50% 30%, #242147 0%, #101223 75%); }
+    @keyframes pulseSlow { 0%, 100% { opacity: 0.72; transform: scale(1); } 50% { opacity: 1; transform: scale(1.04); } }
+    .animate-pulse-slow { animation: pulseSlow 3s ease-in-out infinite; }
+    @keyframes dawnMistDrift {
+      0% { opacity: 0.22; transform: translateX(-4%) scale(1.02); }
+      50% { opacity: 0.48; transform: translateX(4%) scale(1.06); }
+      100% { opacity: 0.22; transform: translateX(-4%) scale(1.02); }
+    }
+    .dawn-mist-layer {
+      background: radial-gradient(ellipse at 50% 15%, rgba(251, 191, 36, 0.22) 0%, rgba(129, 140, 248, 0.12) 42%, transparent 75%);
+      animation: dawnMistDrift 6s ease-in-out infinite;
+    }
+    @keyframes stepFadeIn {
+      0% { opacity: 0; transform: translateY(12px) scale(0.98); filter: blur(4px); }
+      100% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+    }
+    .animate-step-in { animation: stepFadeIn 0.75s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+    @keyframes centerRevealPop {
+      0% { opacity: 0; transform: scale(0.92) translateY(16px); }
+      100% { opacity: 1; transform: scale(1) translateY(0); }
+    }
+    .animate-center-reveal { animation: centerRevealPop 0.55s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+    input[type="range"] { accent-color: #f59e0b; }
+  </style>
+</head>
+<body class="selection:bg-amber-500/30 selection:text-amber-100">
+  <!-- Header -->
+  <header class="sticky top-0 z-40 border-b border-indigo-950/80 bg-[#090a15]/90 backdrop-blur-md">
+    <div class="max-w-5xl mx-auto px-3 sm:px-5 h-14 flex items-center justify-between gap-2">
+      <button id="btnLogoHome" type="button" class="flex items-center gap-2.5 text-left group focus:outline-none">
+        <span class="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-400 to-orange-600 flex items-center justify-center text-base shadow-md">🌕</span>
+        <div class="leading-tight">
+          <div class="font-display font-extrabold text-sm sm:text-base tracking-wider text-white group-hover:text-amber-300 transition">MOONCOURT</div>
+          <div class="text-[9px] tracking-[0.18em] text-amber-300/80 uppercase hidden sm:block">LIVE MULTI-DEVICE</div>
+        </div>
+      </button>
+
+      <div class="flex items-center gap-1.5 sm:gap-2">
+        <span id="connPill" class="px-2 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/35 text-[10px] font-bold text-emerald-300">● ออนไลน์</span>
+
+        <button id="btnRoomBadge" type="button" class="hidden items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/15 border border-amber-500/35 text-amber-300 text-xs font-bold hover:bg-amber-500/25 transition">
+          <span>ROOM</span>
+          <span id="topRoomCode" class="font-mono tracking-wider text-amber-200">------</span>
+          <span class="text-[10px]">📋</span>
+        </button>
+
+        <button id="btnToggleAudio" type="button" class="px-2.5 py-1.5 rounded-lg bg-slate-900/90 border border-slate-700/80 text-xs font-medium text-slate-200 hover:bg-slate-800 transition flex items-center gap-1">
+          <span id="audioIcon">🔊</span>
+          <span class="hidden sm:inline" id="audioLabel">เสียงเปิด</span>
+        </button>
+
+        <button id="btnOpenRules" type="button" class="px-2.5 py-1.5 rounded-lg bg-amber-500/15 border border-amber-400/35 text-xs font-semibold text-amber-200 hover:bg-amber-500/25 transition flex items-center gap-1.5">
+          <span>📖</span><span>GUIDE</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main id="appRoot" class="max-w-5xl mx-auto px-3 sm:px-5 py-4 sm:py-6 pb-24"></main>
+  <div id="toastContainer" class="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-2 pointer-events-none w-[92%] max-w-sm"></div>
+
+  <!-- Real Scannable QR Modal -->
+  <div id="qrModal" class="hidden fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="glass-card rounded-3xl w-full max-w-sm p-6 border border-amber-500/40 shadow-2xl text-center space-y-4 moon-glow">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-bold tracking-widest uppercase text-amber-300">สแกน QR เข้าห้องทันที</span>
+        <button id="btnCloseQrModal" type="button" class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold">✕</button>
+      </div>
+      <div id="qrSvgWrap" class="mx-auto w-52 h-52 p-3 rounded-2xl bg-white flex items-center justify-center shadow-lg"></div>
+      <div class="space-y-1">
+        <div class="text-xs text-slate-400">รหัสห้อง 6 หลัก</div>
+        <div id="qrRoomCodeBig" class="font-mono text-3xl font-extrabold tracking-[0.25em] text-amber-300">------</div>
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <button id="btnCopyJoinLink" type="button" class="py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs">🔗 คัดลอกลิงก์เข้าห้อง</button>
+        <button id="btnCopyTvLink" type="button" class="py-2.5 rounded-xl bg-indigo-900 hover:bg-indigo-800 border border-indigo-500/40 text-indigo-100 font-bold text-xs">📺 ลิงก์จอกลางวง</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Field Guide Modal -->
+  <div id="rulesModal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5">
+    <div class="glass-card rounded-2xl w-full max-w-2xl max-h-[88vh] flex flex-col overflow-hidden border border-indigo-500/30 shadow-2xl">
+      <div class="px-4 sm:px-5 py-3.5 border-b border-indigo-950 flex items-center justify-between">
+        <h2 class="font-display font-bold text-base sm:text-lg text-white tracking-wide">📖 FIELD GUIDE — 12 SECRET IDENTITIES</h2>
+        <button id="btnCloseRules" type="button" class="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-bold">✕</button>
+      </div>
+      <div id="rulesModalBody" class="p-4 sm:p-5 overflow-y-auto space-y-4 text-xs text-slate-300"></div>
+    </div>
+  </div>
+
+  <script>
+    // =========================================================================
+    // 1. ROLE DEFINITIONS (12 SECRET IDENTITIES)
+    // =========================================================================
+    const ROLES = {
+      werewolf:    { id: 'werewolf',    nameTh: 'หมาป่า',       nameEn: 'Werewolf',    team: 'dark',    teamLabel: 'THE DARK SIDE', icon: '🐺', weight: -6, desc: 'ตื่นทุกคืนร่วมกับฝูงหมาป่าเพื่อเลือกสังหารผู้เล่น 1 คน' },
+      wolfcub:     { id: 'wolfcub',     nameTh: 'ลูกหมาป่า',    nameEn: 'Wolf Cub',    team: 'dark',    teamLabel: 'THE DARK SIDE', icon: '🐾', weight: -8, desc: 'อยู่ฝ่ายหมาป่า หากเสียชีวิต คืนถัดไปฝูงหมาป่าจะสังหารได้ถึง 2 คน!' },
+      defender:    { id: 'defender',    nameTh: 'ผู้พิทักษ์',   nameEn: 'Defender',    team: 'village', teamLabel: 'THE VILLAGE',   icon: '🛡️', weight: 3,  desc: 'ตื่นทุกคืนปกป้องผู้เล่น 1 คนจากการถูกหมาป่ากัด (ห้ามซ้ำ 2 คืนติด)' },
+      seer:        { id: 'seer',        nameTh: 'ผู้หยั่งรู้',  nameEn: 'Seer',        team: 'village', teamLabel: 'THE VILLAGE',   icon: '🔮', weight: 7,  desc: 'ตื่นทุกคืนตรวจสอบผู้เล่น 1 คนว่าอยู่ฝ่ายมืดหรือฝ่ายหมู่บ้าน' },
+      witch:       { id: 'witch',       nameTh: 'แม่มด',        nameEn: 'Witch',       team: 'village', teamLabel: 'THE VILLAGE',   icon: '🧪', weight: 4,  desc: 'มีน้ำยาชุบชีวิต 1 ขวด และน้ำยาพิษ 1 ขวด ใช้ได้ครั้งเดียวทั้งเกม' },
+      hunter:      { id: 'hunter',      nameTh: 'นายพราน',      nameEn: 'Hunter',      team: 'village', teamLabel: 'THE VILLAGE',   icon: '🏹', weight: 3,  desc: 'เมื่อเสียชีวิต สามารถยิงผู้เล่น 1 คนให้ตายตามไปได้ทันที' },
+      cupid:       { id: 'cupid',       nameTh: 'กามเทพ',       nameEn: 'Cupid',       team: 'village', teamLabel: 'THE VILLAGE',   icon: '💘', weight: -1, desc: 'ตื่นคืนแรกจับคู่ผู้เล่น 2 คนเป็นคู่รัก หากคนหนึ่งตาย อีกคนตายตามทันที' },
+      spellcaster: { id: 'spellcaster', nameTh: 'จอมเวทใบ้',    nameEn: 'Spellcaster', team: 'village', teamLabel: 'THE VILLAGE',   icon: '🤐', weight: 1,  desc: 'ตื่นทุกคืนสาปปิดปากผู้เล่น 1 คน ห้ามพูดในเฟสกลางวันถัดไป' },
+      revealer:    { id: 'revealer',    nameTh: 'ผู้เปิดโปง',   nameEn: 'Revealer',    team: 'village', teamLabel: 'THE VILLAGE',   icon: '👁️', weight: 4,  desc: 'ชี้เปิดโปง 1 คนกลางคืน ถ้าเป็นหมาป่าตายทันที ถ้าทายผิดคุณตายเอง' },
+      huntress:    { id: 'huntress',    nameTh: 'นักล่าหญิง',   nameEn: 'Huntress',    team: 'village', teamLabel: 'THE VILLAGE',   icon: '🗡️', weight: 3,  desc: 'มีลูกศรลอบสังหาร 1 ดอกใช้ได้ครั้งเดียวตอนกลางคืน' },
+      villager:    { id: 'villager',    nameTh: 'ชาวบ้าน',      nameEn: 'Villager',    team: 'village', teamLabel: 'THE VILLAGE',   icon: '👨‍🌾', weight: 1,  desc: 'ไม่มีพลังพิเศษ ใช้การจับผิดและโหวตเพื่อกำจัดฝ่ายหมาป่า' },
+      tanner:      { id: 'tanner',      nameTh: 'คนอยากตาย',    nameEn: 'Tanner',      team: 'neutral', teamLabel: 'THE OUTSIDER',  icon: '😵', weight: -2, desc: 'ฝ่ายอิสระ ชนะคนเดียวทันทีหากหลอกให้หมู่บ้านลงมติประหารคุณได้สำเร็จ' }
+    };
+
+    const ROLE_ORDER_LIST = [
+      'werewolf', 'wolfcub', 'defender', 'seer', 'witch', 'hunter',
+      'cupid', 'spellcaster', 'revealer', 'huntress', 'villager', 'tanner'
+    ];
+
+    const DECK_PRESETS = {
+      6:  { label: '6 คน (เริ่มต้น)', deck: { werewolf: 1, defender: 1, seer: 1, hunter: 1, villager: 2 } },
+      8:  { label: '8 คน (มาตรฐาน)',  deck: { werewolf: 2, defender: 1, seer: 1, witch: 1, spellcaster: 1, villager: 2 } },
+      12: { label: '12 คน (ครบชุด)',  deck: { werewolf: 2, wolfcub: 1, defender: 1, seer: 1, witch: 1, hunter: 1, cupid: 1, spellcaster: 1, revealer: 1, huntress: 1, tanner: 1 } }
+    };
+
+    const AVATAR_GALLERY = ['🐺','🦊','🦉','🦝','🦌','🐈‍⬛','🐻','🦇','🕊️','🐇','🦁','🐼','🐯','🐸','🐙','🦋','🦅','🦄'];
+
+    // =========================================================================
+    // 2. AUDIO ENGINE
+    // =========================================================================
+    const AudioEngine = {
+      enabled: true,
+      ctx: null,
+      init() {
+        if (!this.ctx && (window.AudioContext || window.webkitAudioContext)) {
+          try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+        }
+        if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
+      },
+      playTone(freq, dur = 0.22, type = 'sine', gainVal = 0.1, delay = 0) {
+        if (!this.enabled) return;
+        this.init();
+        if (!this.ctx) return;
+        try {
+          const now = this.ctx.currentTime + delay;
+          const osc = this.ctx.createOscillator();
+          const g = this.ctx.createGain();
+          osc.type = type;
+          osc.frequency.setValueAtTime(freq, now);
+          g.gain.setValueAtTime(0.001, now);
+          g.gain.exponentialRampToValueAtTime(gainVal, now + 0.03);
+          g.gain.exponentialRampToValueAtTime(0.001, now + dur);
+          osc.connect(g); g.connect(this.ctx.destination);
+          osc.start(now); osc.stop(now + dur + 0.02);
+        } catch (e) {}
+      },
+      playCue(cue) {
+        if (cue === 'night') { this.playTone(220, 0.45, 'sine', 0.1, 0); this.playTone(164.8, 0.65, 'triangle', 0.12, 0.2); }
+        else if (cue === 'dawn') { this.playTone(392, 0.25, 'sine', 0.1, 0); this.playTone(587.3, 0.4, 'sine', 0.11, 0.2); }
+        else if (cue === 'death') { this.playTone(146.8, 0.45, 'sawtooth', 0.07, 0); this.playTone(110, 0.6, 'sawtooth', 0.08, 0.22); }
+        else if (cue === 'gavel') { this.playTone(293.6, 0.2, 'triangle', 0.11, 0); this.playTone(220, 0.3, 'triangle', 0.11, 0.14); }
+        else if (cue === 'win') { [523.2, 659.2, 784, 1046.5].forEach((f, i) => this.playTone(f, 0.35, 'triangle', 0.1, i * 0.12)); }
+        else this.playTone(520, 0.06, 'sine', 0.05, 0);
+      },
+      speak(text) {
+        if (!this.enabled || !text) return;
+        const voiceOn = serverState?.timers?.voiceNarrator !== false;
+        if (!voiceOn) return;
+        // Only Host phone or TV display speaks aloud so 10 phones don't echo!
+        const me = getMe();
+        if (!serverState?.isTv && (!me || !me.isHost)) return;
+        try {
+          if ('speechSynthesis' in window) {
+            window.speechSynthesis.cancel();
+            const u = new SpeechSynthesisUtterance(text);
+            u.lang = 'th-TH'; u.rate = 1.02; u.pitch = 0.95;
+            window.speechSynthesis.speak(u);
+          }
+        } catch (e) {}
+      }
+    };
+
+    // =========================================================================
+    // 3. LOCAL UI STATE + SOCKET.IO CONNECTION
+    // =========================================================================
+    const socket = io();
+    let serverState = null;
+
+    const ui = {
+      homeTab: 'create',
+      homeRoleFilter: 'all',
+      lobbyTab: 'players',
+      draftNickname: '',
+      draftRoomCode: '',
+      draftAvatar: '🐺',
+      draftCustomAvatarUrl: '',
+      roleCardRevealed: false,
+      decoyTapCount: 0,
+      dawnRevealedCount: 1,
+      dawnKey: '',
+      dawnTimer: null,
+      gameoverModalOpen: false,
+      lastPhase: ''
+    };
+
+    // Check URL query (?room=123456 or ?tv=123456)
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('room')) {
+      ui.homeTab = 'join';
+      ui.draftRoomCode = params.get('room').replace(/\D/g, '').slice(0, 6);
+    }
+
+    socket.on('connect', () => {
+      const pill = document.getElementById('connPill');
+      if (pill) { pill.textContent = '● ออนไลน์'; pill.className = 'px-2 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/35 text-[10px] font-bold text-emerald-300'; }
+
+      // Auto-join TV display mode if ?tv=ROOMCODE
+      const tvCode = params.get('tv');
+      if (tvCode) {
+        socket.emit('table:join', { roomCode: tvCode }, (res) => {
+          if (!res?.ok) showToast(res?.error || 'ไม่พบห้อง TV', 'error');
+        });
+        return;
+      }
+
+      // Auto-reconnect if saved session exists
+      try {
+        const saved = JSON.parse(localStorage.getItem('mooncourt_session') || 'null');
+        if (saved && saved.roomCode && saved.sessionToken && !params.get('room')) {
+          socket.emit('room:reconnect', saved, (res) => {
+            if (!res?.ok) localStorage.removeItem('mooncourt_session');
+          });
+        }
+      } catch (e) {}
+    });
+
+    socket.on('disconnect', () => {
+      const pill = document.getElementById('connPill');
+      if (pill) { pill.textContent = '○ กำลังเชื่อมต่อใหม่...'; pill.className = 'px-2 py-1 rounded-full bg-amber-500/15 border border-amber-500/35 text-[10px] font-bold text-amber-300'; }
+    });
+
+    socket.on('room:audio', ({ cue, speakText }) => {
+      AudioEngine.playCue(cue);
+      if (speakText) AudioEngine.speak(speakText);
+    });
+
+    socket.on('room:tick', ({ remaining, total }) => {
+      if (!serverState) return;
+      serverState.game.timerRemaining = remaining;
+      serverState.game.timerTotal = total;
+      updateTimerDOM();
+    });
+
+    socket.on('room:state', (nextState) => {
+      const prevPhase = ui.lastPhase;
+      serverState = nextState;
+      const curPhase = nextState.game?.phase || '';
+      ui.lastPhase = curPhase;
+
+      // Trigger step-by-step Dawn reveal when entering dawn
+      if (curPhase === 'dawn') {
+        const key = `${nextState.roomCode}_${nextState.game.round}`;
+        if (ui.dawnKey !== key) {
+          ui.dawnKey = key;
+          ui.dawnRevealedCount = 1;
+          if (ui.dawnTimer) clearInterval(ui.dawnTimer);
+          const totalSteps = nextState.game.dawnSteps?.length || 1;
+          if (totalSteps > 1) {
+            ui.dawnTimer = setInterval(() => {
+              if (!serverState || serverState.game.phase !== 'dawn') {
+                clearInterval(ui.dawnTimer); ui.dawnTimer = null; return;
+              }
+              if (ui.dawnRevealedCount < serverState.game.dawnSteps.length) {
+                ui.dawnRevealedCount += 1;
+                AudioEngine.playTone(329.63, 0.2, 'sine', 0.05, 0);
+                render();
+              } else {
+                clearInterval(ui.dawnTimer); ui.dawnTimer = null;
+              }
+            }, 1500);
+          }
+        }
+      } else if (ui.dawnTimer) {
+        clearInterval(ui.dawnTimer);
+        ui.dawnTimer = null;
+      }
+
+      if (curPhase === 'night' && prevPhase !== 'night') {
+        ui.decoyTapCount = 0;
+        ui.roleCardRevealed = false;
+      }
+
+      // Open center-screen Game Over modal automatically
+      if (curPhase === 'gameover' && prevPhase !== 'gameover') {
+        ui.gameoverModalOpen = true;
+        try {
+          if (typeof confetti === 'function') {
+            confetti({ particleCount: 95, spread: 75, origin: { y: 0.6 } });
+          }
+        } catch (e) {}
+      }
+
+      render();
+    });
+
+    // =========================================================================
+    // 4. HELPERS
+    // =========================================================================
+    function getMe() {
+      if (!serverState || serverState.isTv) return null;
+      return serverState.players.find(p => p.id === serverState.myPlayerId) || null;
+    }
+
+    function getDeckTotal(deck) {
+      return Object.values(deck || {}).reduce((a, b) => a + b, 0);
+    }
+
+    function getDeckBalance(deck) {
+      let s = 0;
+      for (const [k, v] of Object.entries(deck || {})) if (ROLES[k]) s += ROLES[k].weight * v;
+      return s;
+    }
+
+    function renderAvatarBadge(player, sizeCls = 'w-8 h-8 text-lg') {
+      if (player.customAvatarUrl) {
+        return `<img src="${player.customAvatarUrl}" alt="${player.name}" class="${sizeCls} rounded-full object-cover border border-amber-400/40 shrink-0" />`;
+      }
+      return `<span class="${sizeCls} rounded-full bg-slate-800/90 border border-slate-700/80 flex items-center justify-center shrink-0">${player.avatar}</span>`;
+    }
+
+    function showToast(msg, type = 'info') {
+      const box = document.getElementById('toastContainer');
+      const el = document.createElement('div');
+      const cls = {
+        info: 'bg-slate-900/95 border-indigo-500/50 text-slate-100',
+        success: 'bg-emerald-950/95 border-emerald-500/60 text-emerald-100',
+        warn: 'bg-amber-950/95 border-amber-500/60 text-amber-100',
+        error: 'bg-rose-950/95 border-rose-500/60 text-rose-100'
+      };
+      el.className = `px-4 py-2.5 rounded-xl border text-xs sm:text-sm font-medium shadow-xl transition-all duration-300 ${cls[type] || cls.info}`;
+      el.textContent = msg;
+      box.appendChild(el);
+      setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }, 2500);
+    }
+
+    function copyText(text, label = 'คัดลอกแล้ว') {
+      if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(text).then(() => showToast(label, 'success')).catch(() => showToast(text, 'info'));
+      } else {
+        showToast(text, 'info');
+      }
+    }
+
+    function openQrModal() {
+      if (!serverState?.roomCode) return;
+      const code = serverState.roomCode;
+      const joinUrl = `${window.location.origin}/?room=${code}`;
+      document.getElementById('qrRoomCodeBig').textContent = code;
+      const wrap = document.getElementById('qrSvgWrap');
+      try {
+        const qr = qrcode(0, 'M');
+        qr.addData(joinUrl);
+        qr.make();
+        wrap.innerHTML = qr.createSvgTag({ scalable: true, margin: 0 });
+      } catch (e) {
+        wrap.innerHTML = `<div class="text-slate-900 font-mono font-bold text-lg">${code}</div>`;
+      }
+      document.getElementById('qrModal').classList.remove('hidden');
+    }
+
+    function updateTimerDOM() {
+      if (!serverState) return;
+      const textEl = document.getElementById('liveTimerText');
+      const barEl = document.getElementById('liveTimerBar');
+      const s = Math.max(0, serverState.game.timerRemaining || 0);
+      const tot = Math.max(1, serverState.game.timerTotal || 1);
+      if (textEl) {
+        const m = Math.floor(s / 60), sec = s % 60;
+        textEl.textContent = m > 0 ? `${m}:${String(sec).padStart(2, '0')}` : `${s} วิ`;
+      }
+      if (barEl) barEl.style.width = `${Math.max(0, Math.min(100, (s / tot) * 100))}%`;
+    }
+
+    // =========================================================================
+    // 5. RENDERING
+    // =========================================================================
+    function render() {
+      const root = document.getElementById('appRoot');
+      const badge = document.getElementById('btnRoomBadge');
+      const codeEl = document.getElementById('topRoomCode');
+
+      if (serverState?.roomCode) {
+        badge.classList.remove('hidden'); badge.classList.add('flex');
+        codeEl.textContent = serverState.roomCode;
+      } else {
+        badge.classList.add('hidden'); badge.classList.remove('flex');
+      }
+
+      if (!serverState) {
+        root.innerHTML = renderHomeView();
+        bindHomeEvents();
+      } else if (serverState.view === 'lobby') {
+        root.innerHTML = renderLobbyView();
+        bindLobbyEvents();
+      } else {
+        root.innerHTML = renderGameView();
+        bindGameEvents();
+        updateTimerDOM();
+      }
+    }
+
+    function renderHomeView() {
+      const filtered = ROLE_ORDER_LIST.filter(id => ui.homeRoleFilter === 'all' || ROLES[id].team === ui.homeRoleFilter);
+      return `
+        <div class="space-y-8">
+          <section class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
+            <div class="lg:col-span-6 glass-card rounded-3xl p-5 sm:p-6 flex flex-col justify-between space-y-5 moon-glow">
+              <div class="space-y-4">
+                <div class="flex flex-wrap items-center gap-1.5 text-[10px] font-bold tracking-widest uppercase">
+                  <span class="px-2.5 py-1 rounded-full bg-indigo-500/15 border border-indigo-400/30 text-indigo-200">6-18 PLAYERS</span>
+                  <span class="px-2.5 py-1 rounded-full bg-amber-500/15 border border-amber-400/30 text-amber-300">REAL-TIME SYNC</span>
+                  <span class="px-2.5 py-1 rounded-full bg-emerald-500/15 border border-emerald-400/30 text-emerald-300">NO LOGIN</span>
+                </div>
+
+                <div class="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-[#0a0c18] border border-indigo-950">
+                  <button id="tabHomeCreate" type="button" class="py-2.5 rounded-lg text-xs sm:text-sm font-bold transition ${ui.homeTab === 'create' ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950' : 'text-slate-400 hover:text-white'}">✨ สร้างห้องใหม่</button>
+                  <button id="tabHomeJoin" type="button" class="py-2.5 rounded-lg text-xs sm:text-sm font-bold transition ${ui.homeTab === 'join' ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950' : 'text-slate-400 hover:text-white'}">🔑 เข้าร่วมห้อง</button>
+                </div>
+
+                <div>
+                  <label class="block text-[11px] font-bold tracking-wider uppercase text-slate-300 mb-1.5">YOUR NICKNAME</label>
+                  <input id="inputNickname" type="text" maxlength="16" value="${ui.draftNickname}" placeholder="เช่น Third, ต้น, มายด์..."
+                         class="w-full px-4 py-2.5 rounded-xl bg-[#0b0d1a] border border-indigo-900/80 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-amber-400" />
+                </div>
+
+                ${ui.homeTab === 'join' ? `
+                  <div>
+                    <label class="block text-[11px] font-bold tracking-wider uppercase text-slate-300 mb-1.5">ROOM CODE (รหัสห้อง 6 หลัก)</label>
+                    <input id="inputRoomCode" type="text" inputmode="numeric" maxlength="6" value="${ui.draftRoomCode}" placeholder="000000"
+                           class="w-full px-4 py-2.5 rounded-xl bg-[#0b0d1a] border border-indigo-900/80 text-amber-300 font-mono text-lg tracking-[0.35em] text-center focus:outline-none focus:border-amber-400" />
+                  </div>
+                ` : ''}
+
+                <div class="space-y-2">
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="text-[11px] font-bold tracking-wider uppercase text-slate-300">CHOOSE YOUR AVATAR</span>
+                    <label class="cursor-pointer px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-[11px] font-semibold text-amber-300">
+                      📷 อัปโหลดรูปเอง
+                      <input id="inputAvatarFile" type="file" accept="image/*" class="hidden" />
+                    </label>
+                  </div>
+                  ${ui.draftCustomAvatarUrl ? `
+                    <div class="flex items-center justify-between p-2 rounded-xl bg-amber-500/10 border border-amber-500/30">
+                      <div class="flex items-center gap-2"><img src="${ui.draftCustomAvatarUrl}" class="w-8 h-8 rounded-full object-cover" /><span class="text-xs text-amber-200">ใช้รูปที่อัปโหลด</span></div>
+                      <button id="btnClearAvatar" type="button" class="text-xs text-rose-300 px-2">ลบ</button>
+                    </div>
+                  ` : ''}
+                  <div class="grid grid-cols-6 sm:grid-cols-9 gap-1.5">
+                    ${AVATAR_GALLERY.map(av => `
+                      <button type="button" data-pick-avatar="${av}" class="h-9 rounded-lg border text-lg flex items-center justify-center transition ${!ui.draftCustomAvatarUrl && ui.draftAvatar === av ? 'bg-amber-500/25 border-amber-400 scale-105' : 'bg-[#0b0d1a] border-indigo-950 hover:border-indigo-500/60'}">${av}</button>
+                    `).join('')}
+                  </div>
+                </div>
+              </div>
+
+              <div class="pt-2 space-y-2">
+                ${ui.homeTab === 'join' ? `
+                  <button id="btnJoinRoom" type="button" class="w-full py-3.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-extrabold text-sm shadow-lg">เข้าร่วมห้องด้วยรหัส 6 หลัก →</button>
+                  <button id="btnJoinTv" type="button" class="w-full py-2.5 rounded-xl bg-indigo-950 hover:bg-indigo-900 border border-indigo-500/35 text-indigo-200 font-bold text-xs">📺 เปิดเครื่องนี้เป็นจอกลางวง (TV Mode)</button>
+                ` : `
+                  <button id="btnCreateRoom" type="button" class="w-full py-3.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-extrabold text-sm shadow-lg">🌙 สร้างห้องใหม่ (Host เล่นด้วย)</button>
+                `}
+              </div>
+            </div>
+
+            <div class="lg:col-span-6 relative rounded-3xl overflow-hidden border border-indigo-500/25 min-h-[300px] flex flex-col justify-end moon-glow">
+              <img src="/assets/hero.jpg" alt="Mooncourt" class="absolute inset-0 w-full h-full object-cover object-center" />
+              <div class="absolute inset-0 bg-gradient-to-t from-[#080914] via-[#080914]/65 to-transparent"></div>
+              <div class="relative p-6 sm:p-7 space-y-3">
+                <div class="text-[11px] font-bold tracking-[0.25em] text-amber-300 uppercase">THE NIGHT HAS A SECRET</div>
+                <h1 class="font-display text-3xl sm:text-4xl font-extrabold tracking-wide text-white">MOONCOURT</h1>
+                <p class="text-xs sm:text-sm text-slate-300 leading-relaxed max-w-md">
+                  เล่นข้ามมือถือหลายเครื่องแบบเรียลไทม์ ไม่ต้องล็อกอิน Host ร่วมเล่นได้จริงพร้อมเซิร์ฟเวอร์ Auto-Moderator กันโกง 100%
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <section class="glass-card rounded-3xl p-5 sm:p-6 space-y-4">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div class="text-[11px] font-bold tracking-[0.2em] text-amber-300 uppercase">MEET YOUR FATE</div>
+                <h2 class="font-display text-lg sm:text-xl font-extrabold text-white">12 SECRET IDENTITIES</h2>
+              </div>
+              <div class="flex flex-wrap gap-1 p-1 rounded-xl bg-[#0a0c18] border border-indigo-950">
+                <button data-home-filter="all" type="button" class="px-2.5 py-1.5 rounded-lg text-xs font-bold ${ui.homeRoleFilter === 'all' ? 'bg-amber-500 text-slate-950' : 'text-slate-400'}">ทั้งหมด (12)</button>
+                <button data-home-filter="dark" type="button" class="px-2.5 py-1.5 rounded-lg text-xs font-bold ${ui.homeRoleFilter === 'dark' ? 'bg-rose-600 text-white' : 'text-slate-400'}">🐺 ฝ่ายมืด (2)</button>
+                <button data-home-filter="village" type="button" class="px-2.5 py-1.5 rounded-lg text-xs font-bold ${ui.homeRoleFilter === 'village' ? 'bg-sky-600 text-white' : 'text-slate-400'}">🛡️ หมู่บ้าน (9)</button>
+                <button data-home-filter="neutral" type="button" class="px-2.5 py-1.5 rounded-lg text-xs font-bold ${ui.homeRoleFilter === 'neutral' ? 'bg-orange-500 text-slate-950' : 'text-slate-400'}">🎭 อิสระ (1)</button>
+              </div>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+              ${filtered.map(id => {
+                const r = ROLES[id];
+                return `
+                  <div class="p-3.5 rounded-2xl bg-[#0b0d1a]/90 border ${r.team === 'dark' ? 'border-rose-500/30' : r.team === 'neutral' ? 'border-orange-500/35' : 'border-indigo-900/70'} flex items-start gap-3">
+                    <div class="w-10 h-10 rounded-xl bg-slate-900 flex items-center justify-center text-xl shrink-0">${r.icon}</div>
+                    <div>
+                      <div class="font-bold text-sm text-white">${r.nameEn} <span class="text-xs text-amber-300">(${r.nameTh})</span></div>
+                      <p class="text-[11px] text-slate-400 mt-1 leading-relaxed">${r.desc}</p>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          </section>
+        </div>
+      `;
+    }
+
+    function bindHomeEvents() {
+      document.getElementById('tabHomeCreate')?.addEventListener('click', () => { ui.homeTab = 'create'; render(); });
+      document.getElementById('tabHomeJoin')?.addEventListener('click', () => { ui.homeTab = 'join'; render(); });
+      document.getElementById('inputNickname')?.addEventListener('input', e => ui.draftNickname = e.target.value);
+      document.getElementById('inputRoomCode')?.addEventListener('input', e => ui.draftRoomCode = e.target.value);
+      document.querySelectorAll('[data-pick-avatar]').forEach(btn => {
+        btn.addEventListener('click', () => { ui.draftAvatar = btn.dataset.pickAvatar; ui.draftCustomAvatarUrl = ''; render(); });
+      });
+      document.getElementById('inputAvatarFile')?.addEventListener('change', (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        if (file.size > 2 * 1024 * 1024) { showToast('รูปต้องขนาดไม่เกิน 2 MB', 'warn'); return; }
+        const r = new FileReader();
+        r.onload = () => { ui.draftCustomAvatarUrl = String(r.result || ''); render(); };
+        r.readAsDataURL(file);
+      });
+      document.getElementById('btnClearAvatar')?.addEventListener('click', () => { ui.draftCustomAvatarUrl = ''; render(); });
+      document.querySelectorAll('[data-home-filter]').forEach(btn => {
+        btn.addEventListener('click', () => { ui.homeRoleFilter = btn.dataset.homeFilter; render(); });
+      });
+
+      document.getElementById('btnCreateRoom')?.addEventListener('click', () => {
+        AudioEngine.init();
+        socket.emit('room:create', {
+          nickname: ui.draftNickname || 'Host',
+          avatar: ui.draftAvatar,
+          customAvatarUrl: ui.draftCustomAvatarUrl
+        }, (res) => {
+          if (res?.ok) {
+            try { localStorage.setItem('mooncourt_session', JSON.stringify({ roomCode: res.roomCode, sessionToken: res.sessionToken })); } catch (e) {}
+            showToast(`สร้างห้อง #${res.roomCode} สำเร็จ!`, 'success');
+          }
+        });
+      });
+
+      document.getElementById('btnJoinRoom')?.addEventListener('click', () => {
+        AudioEngine.init();
+        socket.emit('room:join', {
+          roomCode: ui.draftRoomCode,
+          nickname: ui.draftNickname || 'ผู้เล่น',
+          avatar: ui.draftAvatar,
+          customAvatarUrl: ui.draftCustomAvatarUrl
+        }, (res) => {
+          if (res?.ok) {
+            try { localStorage.setItem('mooncourt_session', JSON.stringify({ roomCode: res.roomCode, sessionToken: res.sessionToken })); } catch (e) {}
+            showToast(`เข้าร่วมห้อง #${res.roomCode} แล้ว!`, 'success');
+          } else {
+            showToast(res?.error || 'ไม่สามารถเข้าห้องได้', 'error');
+          }
+        });
+      });
+
+      document.getElementById('btnJoinTv')?.addEventListener('click', () => {
+        AudioEngine.init();
+        socket.emit('table:join', { roomCode: ui.draftRoomCode }, (res) => {
+          if (res?.ok) showToast(`เชื่อมต่อโหมดจอกลางวงห้อง #${res.roomCode} แล้ว`, 'success');
+          else showToast(res?.error || 'ไม่พบห้อง', 'error');
+        });
+      });
+    }
+
+    function renderLobbyView() {
+      const me = getMe();
+      const isHost = Boolean(me?.isHost);
+      const pCount = serverState.players.length;
+      const dCount = getDeckTotal(serverState.deck);
+      const balance = getDeckBalance(serverState.deck);
+      const darkCount = (serverState.deck.werewolf || 0) + (serverState.deck.wolfcub || 0);
+      const canStart = isHost && pCount >= 6 && pCount <= 18 && dCount === pCount && darkCount >= 1 && darkCount < Math.ceil(pCount / 2);
+
+      return `
+        <div class="space-y-4">
+          <section class="glass-card rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-amber-500/30 moon-glow">
+            <div class="space-y-1">
+              <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 text-[11px] font-bold">Live Multi-Device Lobby</span>
+                ${serverState.isTv ? '<span class="px-2 py-0.5 rounded-md bg-indigo-500/25 text-indigo-200 text-[11px] font-bold">📺 TV Display Mode</span>' : ''}
+              </div>
+              <div class="flex flex-wrap items-center gap-2.5">
+                <span class="text-xs text-slate-400">ROOM:</span>
+                <span class="font-mono text-2xl sm:text-3xl font-extrabold tracking-[0.22em] text-amber-300">${serverState.roomCode}</span>
+                <button id="btnCopyRoomLobby" type="button" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 border border-slate-700">คัดลอก</button>
+                <button id="btnShowQrLobby" type="button" class="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-xs font-bold text-amber-300 border border-amber-500/40">📱 QR สแกนเข้าห้อง</button>
+              </div>
+            </div>
+            <div class="flex items-center gap-3 bg-[#0a0c18] px-4 py-3 rounded-xl border border-indigo-950 shrink-0">
+              <div class="text-center"><div class="text-lg font-extrabold ${pCount === dCount && pCount >= 6 ? 'text-emerald-400' : 'text-amber-400'}">${pCount}</div><div class="text-[11px] text-slate-400">ผู้เล่น</div></div>
+              <div class="text-slate-600 font-bold">/</div>
+              <div class="text-center"><div class="text-lg font-extrabold text-white">${dCount}</div><div class="text-[11px] text-slate-400">การ์ด</div></div>
+            </div>
+          </section>
+
+          <div class="grid grid-cols-3 gap-2 p-1 rounded-xl bg-[#0a0c18] border border-indigo-950">
+            <button data-lobby-tab="players" type="button" class="py-2.5 rounded-lg text-xs sm:text-sm font-bold ${ui.lobbyTab === 'players' ? 'bg-amber-500 text-slate-950' : 'text-slate-400'}">👥 ผู้เล่น (${pCount})</button>
+            <button data-lobby-tab="deck" type="button" class="py-2.5 rounded-lg text-xs sm:text-sm font-bold ${ui.lobbyTab === 'deck' ? 'bg-amber-500 text-slate-950' : 'text-slate-400'}">🃏 Role Deck (${dCount})</button>
+            <button data-lobby-tab="timers" type="button" class="py-2.5 rounded-lg text-xs sm:text-sm font-bold ${ui.lobbyTab === 'timers' ? 'bg-amber-500 text-slate-950' : 'text-slate-400'}">⏱️ ตั้งเวลา 6 เฟส</button>
+          </div>
+
+          ${ui.lobbyTab === 'players' ? `
+            <section class="glass-card rounded-2xl p-4 sm:p-5 space-y-4">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <h2 class="font-bold text-base text-white">สมาชิกในห้อง (${pCount}/18)</h2>
+                ${isHost ? `
+                  <div class="flex flex-wrap gap-2">
+                    <button id="btnAddBot" type="button" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-200">+ เพิ่มบอท 1 คน</button>
+                    <button id="btnFillBots" type="button" class="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-xs font-semibold text-amber-300">⚡ เติมบอทให้ครบการ์ด</button>
+                  </div>
+                ` : '<span class="text-xs text-slate-400">รอ Host ตั้งค่าและเริ่มเกม...</span>'}
+              </div>
+              <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
+                ${serverState.players.map(p => `
+                  <div class="p-3 rounded-xl bg-[#0b0d1a] border ${p.id === serverState.myPlayerId ? 'border-amber-500/50' : 'border-indigo-950'} flex items-center justify-between gap-2">
+                    <div class="flex items-center gap-2 min-w-0">
+                      ${renderAvatarBadge(p, 'w-8 h-8 text-base')}
+                      <div class="min-w-0">
+                        <div class="text-xs sm:text-sm font-bold text-white truncate">${p.name}</div>
+                        <div class="text-[10px] ${p.connected ? 'text-emerald-400' : 'text-rose-400'}">${p.isHost ? '👑 Host' : p.isBot ? '🤖 บอท' : p.connected ? '📱 ออนไลน์' : '○ หลุดการเชื่อมต่อ'}</div>
+                      </div>
+                    </div>
+                    ${isHost && !p.isHost ? `<button data-remove-player="${p.id}" type="button" class="w-6 h-6 rounded-md bg-slate-800 hover:bg-rose-600 text-slate-400 hover:text-white text-xs">✕</button>` : ''}
+                  </div>
+                `).join('')}
+              </div>
+            </section>
+          ` : ''}
+
+          ${ui.lobbyTab === 'deck' ? `
+            <section class="glass-card rounded-2xl p-4 sm:p-5 space-y-4">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="text-sm font-bold text-white">ปรับแต่ง Role Deck (คะแนนสมดุล: <span class="text-amber-300">${balance > 0 ? '+' + balance : balance}</span>)</div>
+                ${isHost ? `
+                  <div class="flex flex-wrap gap-1.5">
+                    ${Object.entries(DECK_PRESETS).map(([k, v]) => `<button data-preset="${k}" type="button" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs">${v.label}</button>`).join('')}
+                  </div>
+                ` : ''}
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                ${ROLE_ORDER_LIST.map(id => {
+                  const r = ROLES[id];
+                  const c = serverState.deck[id] || 0;
+                  return `
+                    <div class="p-3 rounded-xl border flex items-start justify-between gap-3 ${c > 0 ? 'bg-[#0d1022] border-amber-500/35' : 'bg-[#0a0c18]/60 border-indigo-950 opacity-75'}">
+                      <div class="flex items-start gap-2.5">
+                        <span class="w-9 h-9 rounded-xl bg-slate-800 flex items-center justify-center text-lg shrink-0">${r.icon}</span>
+                        <div>
+                          <div class="font-bold text-sm text-white">${r.nameEn} <span class="text-xs text-amber-300">(${r.nameTh})</span></div>
+                          <p class="text-[11px] text-slate-400 mt-0.5">${r.desc}</p>
+                        </div>
+                      </div>
+                      <div class="flex items-center gap-1.5 shrink-0">
+                        ${isHost ? `<button data-role-dec="${id}" type="button" class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 font-bold">−</button>` : ''}
+                        <span class="w-6 text-center font-mono font-bold text-sm ${c > 0 ? 'text-amber-300' : 'text-slate-500'}">${c}</span>
+                        ${isHost ? `<button data-role-inc="${id}" type="button" class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-amber-500 hover:text-slate-950 font-bold">+</button>` : ''}
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </section>
+          ` : ''}
+
+          ${ui.lobbyTab === 'timers' ? `
+            <section class="glass-card rounded-2xl p-4 sm:p-5 space-y-4">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                ${[
+                  ['roleReveal', '👁️ 1. เปิดดูบทบาท', 5, 60],
+                  ['nightAction', '🌙 2. กลางคืน (ต่อบทบาท)', 10, 90],
+                  ['dayDiscussion', '☀️ 3. กลางวัน / พูดคุย', 15, 600],
+                  ['voting', '🗳️ 4. โหวตเสนอชื่อ', 10, 120],
+                  ['defenseTrial', '⚔️ 5. แก้ต่าง / ตัดสิน', 10, 120],
+                  ['secondChance', '🛡️ 6. Second Chance', 5, 60]
+                ].map(([k, lbl, min, max]) => `
+                  <div class="p-3 rounded-xl bg-[#0b0d1a] border border-indigo-950 flex items-center justify-between gap-2">
+                    <span class="text-xs sm:text-sm font-bold text-white">${lbl}</span>
+                    <div class="flex items-center gap-1.5">
+                      <input type="number" data-timer-num="${k}" min="${min}" max="${max}" value="${serverState.timers[k]}" ${isHost ? '' : 'disabled'}
+                             class="w-16 px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-amber-300 font-mono font-bold text-sm text-center" />
+                      <span class="text-xs text-slate-400">วิ</span>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+              <div class="grid sm:grid-cols-3 gap-2.5 text-xs">
+                <label class="p-3 rounded-xl bg-[#0b0d1a] border border-indigo-950 flex items-center justify-between gap-2">
+                  <span>🃏 การ์ดเหตุการณ์รายคืน</span>
+                  <input type="checkbox" data-timer-flag="enableNightEvents" ${serverState.timers.enableNightEvents ? 'checked' : ''} ${isHost ? '' : 'disabled'} class="accent-amber-500" />
+                </label>
+                <label class="p-3 rounded-xl bg-[#0b0d1a] border border-indigo-950 flex items-center justify-between gap-2">
+                  <span>🎙️ เสียงบรรยาย (Host/TV)</span>
+                  <input type="checkbox" data-timer-flag="voiceNarrator" ${serverState.timers.voiceNarrator ? 'checked' : ''} ${isHost ? '' : 'disabled'} class="accent-amber-500" />
+                </label>
+                <label class="p-3 rounded-xl bg-[#0b0d1a] border border-indigo-950 flex items-center justify-between gap-2">
+                  <span>🔒 Fixed Night Timer</span>
+                  <input type="checkbox" data-timer-flag="antiMetaFixedNight" ${serverState.timers.antiMetaFixedNight ? 'checked' : ''} ${isHost ? '' : 'disabled'} class="accent-amber-500" />
+                </label>
+              </div>
+            </section>
+          ` : ''}
+
+          ${isHost ? `
+            <div class="fixed bottom-0 inset-x-0 z-30 bg-[#090a15]/95 border-t border-indigo-950 backdrop-blur-md">
+              <div class="max-w-5xl mx-auto px-3 sm:px-5 py-3 flex items-center justify-between gap-3">
+                <div class="text-xs ${canStart ? 'text-emerald-400' : 'text-amber-300'}">
+                  ${canStart ? `✅ พร้อมเริ่มเกม! ผู้เล่น ${pCount} คน ตรงกับการ์ด ${dCount} ใบ` : `⚠️ ต้องมีผู้เล่น 6–18 คน และจำนวนการ์ด (${dCount}) ต้องเท่ากับผู้เล่น (${pCount})`}
+                </div>
+                <button id="btnStartGame" type="button" ${canStart ? '' : 'disabled'} class="px-5 py-2.5 rounded-xl font-extrabold text-sm ${canStart ? 'bg-gradient-to-r from-amber-500 to-rose-500 text-white shadow-lg' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}">🌕 เริ่มเกม</button>
+              </div>
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }
+
+    function bindLobbyEvents() {
+      document.getElementById('btnCopyRoomLobby')?.addEventListener('click', () => copyText(serverState.roomCode, `คัดลอกรหัสห้อง ${serverState.roomCode} แล้ว`));
+      document.getElementById('btnShowQrLobby')?.addEventListener('click', openQrModal);
+      document.querySelectorAll('[data-lobby-tab]').forEach(btn => {
+        btn.addEventListener('click', () => { ui.lobbyTab = btn.dataset.lobbyTab; render(); });
+      });
+      document.getElementById('btnAddBot')?.addEventListener('click', () => socket.emit('lobby:addBot', { fillToDeck: false }));
+      document.getElementById('btnFillBots')?.addEventListener('click', () => socket.emit('lobby:addBot', { fillToDeck: true }));
+      document.querySelectorAll('[data-remove-player]').forEach(btn => {
+        btn.addEventListener('click', () => socket.emit('lobby:removePlayer', { targetId: btn.dataset.removePlayer }));
+      });
+      document.querySelectorAll('[data-preset]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const p = DECK_PRESETS[Number(btn.dataset.preset)];
+          if (!p) return;
+          const next = {};
+          ROLE_ORDER_LIST.forEach(r => next[r] = p.deck[r] || 0);
+          socket.emit('lobby:updateDeck', next);
+        });
+      });
+      document.querySelectorAll('[data-role-dec]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.dataset.roleDec;
+          socket.emit('lobby:updateDeck', { ...serverState.deck, [id]: Math.max(0, (serverState.deck[id] || 0) - 1) });
+        });
+      });
+      document.querySelectorAll('[data-role-inc]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.dataset.roleInc;
+          socket.emit('lobby:updateDeck', { ...serverState.deck, [id]: Math.min(12, (serverState.deck[id] || 0) + 1) });
+        });
+      });
+      document.querySelectorAll('[data-timer-num]').forEach(el => {
+        el.addEventListener('change', () => {
+          socket.emit('lobby:updateTimers', { ...serverState.timers, [el.dataset.timerNum]: Number(el.value) });
+        });
+      });
+      document.querySelectorAll('[data-timer-flag]').forEach(el => {
+        el.addEventListener('change', () => {
+          socket.emit('lobby:updateTimers', { ...serverState.timers, [el.dataset.timerFlag]: el.checked });
+        });
+      });
+      document.getElementById('btnStartGame')?.addEventListener('click', () => {
+        socket.emit('game:start', {}, (res) => { if (!res?.ok) showToast(res?.error || 'เริ่มเกมไม่ได้', 'warn'); });
+      });
+    }
+
+    function renderGameView() {
+      const me = getMe();
+      const isHost = Boolean(me?.isHost);
+      const isTv = Boolean(serverState.isTv);
+      const g = serverState.game;
+      const myRole = me?.role ? ROLES[me.role] : null;
+      const alive = serverState.players.filter(p => p.alive);
+      const dead = serverState.players.filter(p => !p.alive);
+      const showTimer = ['role_reveal', 'night', 'day', 'vote', 'defense', 'second_chance', 'hunter'].includes(g.phase);
+
+      const phaseNames = {
+        role_reveal: '👁️ เฟส 1 • เปิดดูบทบาทลับ',
+        night: `🌙 เฟส 2 • คืนที่ ${g.round}`,
+        dawn: `🌅 รุ่งเช้าวันที่ ${g.round}`,
+        day: `☀️ เฟส 3 • พูดคุยวันที่ ${g.round}`,
+        vote: '🗳️ เฟส 4 • โหวตเสนอชื่อ',
+        defense: '⚔️ เฟส 5 • แก้ต่าง / ตัดสิน',
+        second_chance: '🛡️ เฟส 6 • Second Chance',
+        hunter: '🏹 นายพรานยิงแก้แค้น!',
+        gameover: '🏆 จบเกม'
+      };
+
+      let stageHtml = '';
+
+      if (g.phase === 'role_reveal') {
+        if (isTv) {
+          stageHtml = `<section class="glass-card rounded-3xl p-8 text-center space-y-3 moon-glow"><div class="text-5xl">🃏</div><h2 class="text-2xl font-extrabold text-white">ผู้เล่นทุกคนกำลังเปิดดูบทบาทลับบนมือถือ</h2><p class="text-sm text-slate-400">เตรียมเข้าสู่คืนแรกเมื่อหมดเวลา...</p></section>`;
+        } else if (myRole) {
+          const packMates = serverState.players.filter(p => p.isPackMate).map(p => p.name);
+          stageHtml = `
+            <section class="glass-card rounded-3xl p-6 text-center space-y-4 moon-glow">
+              <h2 class="text-xl font-extrabold text-white">การ์ดบทบาทลับของคุณ</h2>
+              <button id="btnToggleSecretCard" type="button" class="w-full max-w-sm mx-auto block rounded-2xl p-6 border-2 ${ui.roleCardRevealed ? 'bg-indigo-950/90 border-amber-400/70' : 'role-card-hidden border-indigo-800/70'}">
+                ${ui.roleCardRevealed ? `
+                  <div class="space-y-2.5">
+                    <div class="text-5xl">${myRole.icon}</div>
+                    <div class="text-xs font-bold uppercase text-amber-300">${myRole.teamLabel}</div>
+                    <div class="text-2xl font-extrabold text-white">${myRole.nameEn} (${myRole.nameTh})</div>
+                    <p class="text-xs text-slate-300 bg-black/30 p-3 rounded-xl">${myRole.desc}</p>
+                    ${packMates.length > 0 ? `<div class="text-xs text-rose-300 font-bold">🐺 เพื่อนร่วมฝูงหมาป่า: ${packMates.join(', ')}</div>` : ''}
+                  </div>
+                ` : `<div class="py-8 space-y-2"><div class="text-5xl animate-pulse-slow">🃏</div><div class="font-bold text-amber-300">แตะเพื่อเปิดดูบทบาทลับ</div></div>`}
+              </button>
+              ${isHost ? `<button id="btnSkipPhase" type="button" class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs">🌙 เข้าสู่คืนแรกเลย</button>` : ''}
+            </section>
+          `;
+        }
+      } else if (g.phase === 'night') {
+        const pn = g.privateNight;
+        if (!pn || isTv) {
+          stageHtml = `
+            <section class="glass-card rounded-3xl p-6 sm:p-8 text-center space-y-4">
+              <div class="text-5xl animate-pulse-slow">🌌</div>
+              <h2 class="text-xl font-extrabold text-white">หมู่บ้านกำลังหลับใหล...</h2>
+              ${g.currentNightEvent ? `<div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-400/35 text-amber-200 text-xs font-bold">${g.currentNightEvent.icon} ${g.currentNightEvent.name}</div>` : ''}
+              <p class="text-xs text-slate-400">ขั้นตอนกลางคืน ${g.nightStepIndex + 1} / ${g.nightQueueLength}</p>
+              ${!isTv && me?.alive ? `
+                <div class="max-w-xs mx-auto p-3.5 rounded-2xl bg-[#0a0c18] border border-indigo-900/70 space-y-2">
+                  <div class="text-[11px] text-indigo-300 font-semibold">✨ ปุ่มแตะหลอก (Decoy Tap)</div>
+                  <button id="btnDecoyTap" type="button" class="w-full py-2.5 rounded-xl bg-indigo-950 hover:bg-indigo-900 border border-indigo-500/40 text-amber-200 text-xs font-bold">🌙 แตะจับแสงจันทร์ (${ui.decoyTapCount})</button>
+                </div>
+              ` : ''}
+            </section>
+          `;
+        } else {
+          let body = '';
+          if (pn.step === 'cupid') {
+            body = `<p class="text-xs text-pink-300">เลือกคู่รัก 2 คน (${pn.cupidPicks.length}/2)</p><div class="grid grid-cols-2 sm:grid-cols-3 gap-2">${alive.map(p => `<button data-night-target="${p.id}" type="button" class="p-2.5 rounded-xl border text-left flex items-center gap-2 ${pn.cupidPicks.includes(p.id) ? 'bg-pink-600/30 border-pink-400' : 'bg-[#0b0d1a] border-slate-700'}">${renderAvatarBadge(p,'w-7 h-7 text-sm')}<span class="text-xs font-bold truncate">${p.name}</span></button>`).join('')}</div><button id="btnConfirmCupid" type="button" class="w-full py-2.5 rounded-xl bg-pink-600 text-white font-bold text-xs">💘 ยืนยันคู่รัก</button>`;
+          } else if (pn.step === 'wolfpack') {
+            body = `<p class="text-xs text-rose-300">เลือกเหยื่อคืนนี้ (${pn.wolfTargets.length}/${pn.maxKills})</p><div class="grid grid-cols-2 sm:grid-cols-3 gap-2">${alive.filter(p => p.id !== me.id && !p.isPackMate).map(p => `<button data-wolf-target="${p.id}" type="button" class="p-2.5 rounded-xl border text-left flex items-center gap-2 ${pn.wolfTargets.includes(p.id) ? 'bg-rose-600/35 border-rose-400' : 'bg-[#0b0d1a] border-slate-700'}">${renderAvatarBadge(p,'w-7 h-7 text-sm')}<span class="text-xs font-bold truncate">${p.name}</span></button>`).join('')}</div><button id="btnConfirmWolf" type="button" class="w-full py-2.5 rounded-xl bg-rose-600 text-white font-bold text-xs">🐺 ยืนยันเป้าหมาย</button>`;
+          } else if (pn.step === 'defender') {
+            body = `<div class="grid grid-cols-2 sm:grid-cols-3 gap-2">${alive.map(p => `<button data-night-target="${p.id}" type="button" ${p.id === pn.protectedLastNight ? 'disabled' : ''} class="p-2.5 rounded-xl border text-left flex items-center gap-2 ${p.id === pn.protectedLastNight ? 'opacity-40 cursor-not-allowed bg-slate-900 border-slate-800' : 'bg-[#0b0d1a] border-slate-700 hover:border-sky-400'}">${renderAvatarBadge(p,'w-7 h-7 text-sm')}<span class="text-xs font-bold truncate">${p.name}</span></button>`).join('')}</div>`;
+          } else if (pn.step === 'seer') {
+            if (pn.submitted && pn.seerResult) {
+              const t = serverState.players.find(x => x.id === pn.seerResult.targetId);
+              body = pn.seerResult.fogged
+                ? `<div class="p-4 rounded-xl bg-slate-900 border border-indigo-500/40 text-center text-sm font-bold text-indigo-200">🌫️ หมอกลงจัดบดบังสายตา! ไม่สามารถตรวจ ${t?.name} ได้คืนนี้</div>`
+                : `<div class="p-4 rounded-xl border text-center text-sm font-bold ${pn.seerResult.isDark ? 'bg-rose-950 border-rose-500 text-rose-200' : 'bg-emerald-950 border-emerald-500 text-emerald-200'}">${t?.name} ${pn.seerResult.isDark ? '🐺 อยู่ฝ่ายมืด!' : '🛡️ อยู่ฝ่ายหมู่บ้าน'}</div>`;
+            } else {
+              body = `<div class="grid grid-cols-2 sm:grid-cols-3 gap-2">${alive.filter(p => p.id !== me.id).map(p => `<button data-night-target="${p.id}" type="button" class="p-2.5 rounded-xl border bg-[#0b0d1a] border-slate-700 hover:border-violet-400 flex items-center gap-2">${renderAvatarBadge(p,'w-7 h-7 text-sm')}<span class="text-xs font-bold truncate">${p.name}</span></button>`).join('')}</div>`;
+            }
+          } else if (pn.step === 'witch') {
+            const victims = (pn.wolfVictims || []).map(id => serverState.players.find(p => p.id === id)).filter(Boolean);
+            body = `
+              <div class="space-y-3">
+                <div class="p-3 rounded-xl bg-[#0b0d1a] border border-slate-700 text-xs space-y-1.5">
+                  <div class="font-bold text-emerald-300">🧪 น้ำยาชุบชีวิต (${pn.witchHealUsed ? 'ใช้แล้ว' : 'เหลือ 1'})</div>
+                  ${victims.length ? victims.map(v => `<div class="flex items-center justify-between"><span>เหยื่อคืนนี้: <strong>${v.name}</strong></span>${!pn.witchHealUsed ? `<button data-witch-heal="${v.id}" type="button" class="px-2.5 py-1 rounded-lg bg-emerald-600 text-white font-bold">ช่วยชีวิต</button>` : ''}</div>`).join('') : '<div class="text-slate-400">ไม่มีเหยื่อหมาป่า</div>'}
+                </div>
+                ${!pn.witchPoisonUsed ? `<div class="grid grid-cols-2 sm:grid-cols-3 gap-2">${alive.filter(p => p.id !== me.id).map(p => `<button data-witch-poison="${p.id}" type="button" class="p-2 rounded-lg border bg-slate-900 border-slate-700 hover:border-rose-400 text-xs font-bold">☠️ ${p.name}</button>`).join('')}</div>` : ''}
+                <button id="btnWitchDone" type="button" class="w-full py-2.5 rounded-xl bg-amber-500 text-slate-950 font-extrabold text-xs">เสร็จสิ้นตาแม่มด</button>
+              </div>
+            `;
+          } else {
+            body = `<div class="grid grid-cols-2 sm:grid-cols-3 gap-2">${alive.filter(p => p.id !== me.id).map(p => `<button data-night-target="${p.id}" type="button" class="p-2.5 rounded-xl border bg-[#0b0d1a] border-slate-700 hover:border-amber-400 flex items-center gap-2">${renderAvatarBadge(p,'w-7 h-7 text-sm')}<span class="text-xs font-bold truncate">${p.name}</span></button>`).join('')}</div>${['revealer','huntress'].includes(pn.step) ? '<button id="btnNightSkip" type="button" class="w-full py-2 rounded-xl bg-slate-800 text-xs font-bold">ข้ามคืนนี้</button>' : ''}`;
+          }
+          stageHtml = `<section class="glass-card rounded-3xl p-5 space-y-4 border-amber-500/40 moon-glow"><div class="font-extrabold text-base text-amber-300">✨ ถึงตาของคุณแล้ว (${myRole?.icon} ${myRole?.nameEn})</div>${body}</section>`;
+        }
+      } else if (g.phase === 'dawn') {
+        const steps = g.dawnSteps || [];
+        const shown = Math.min(steps.length, Math.max(1, ui.dawnRevealedCount));
+        const visible = steps.slice(0, shown);
+        stageHtml = `
+          <section class="relative overflow-hidden glass-card rounded-3xl p-6 text-center space-y-4 border-amber-500/35 moon-glow">
+            <div class="pointer-events-none absolute inset-0 dawn-mist-layer"></div>
+            <h2 class="relative text-2xl font-extrabold text-white">🌅 รุ่งเช้าวันที่ ${g.round} (${shown}/${steps.length})</h2>
+            <div class="relative space-y-2.5 max-w-lg mx-auto text-left">
+              ${visible.map((st, idx) => `
+                <div class="p-3.5 rounded-2xl border bg-[#0c1022]/85 border-indigo-500/35 flex items-center justify-between gap-3 ${idx === visible.length - 1 ? 'animate-step-in' : ''}">
+                  <div class="flex items-center gap-3"><span class="text-2xl">${st.icon}</span><div><div class="font-bold text-sm text-white">${st.title}</div><div class="text-xs text-slate-300">${st.subtitle}</div></div></div>
+                  ${st.playerId ? '<span class="px-2 py-1 rounded bg-slate-950 text-[10px] font-bold text-slate-400">❓ ปิดลับ</span>' : ''}
+                </div>
+              `).join('')}
+            </div>
+            ${isHost && shown >= steps.length ? `<button id="btnSkipPhase" type="button" class="relative px-6 py-3 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-extrabold text-sm">☀️ เริ่มเฟสกลางวัน / พูดคุย →</button>` : ''}
+          </section>
+        `;
+      } else if (g.phase === 'day') {
+        stageHtml = `
+          <section class="glass-card rounded-2xl p-5 space-y-4">
+            <div class="flex items-center justify-between gap-2">
+              <h2 class="text-lg font-extrabold text-white">☀️ พูดคุยจับผิดในวง</h2>
+              ${isHost ? '<button id="btnSkipPhase" type="button" class="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold">🗳️ ข้ามไปโหวตเลย</button>' : ''}
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              ${alive.map(p => `<div class="p-2.5 rounded-xl bg-[#0b0d1a] border ${p.id === g.silencedPlayerId ? 'border-violet-500' : 'border-indigo-950'} flex items-center justify-between gap-2"><div class="flex items-center gap-2 min-w-0">${renderAvatarBadge(p,'w-7 h-7 text-sm')}<span class="text-xs font-bold truncate">${p.name}</span></div>${p.id === g.silencedPlayerId ? '<span title="ถูกสาปห้ามพูด">🤐</span>' : ''}</div>`).join('')}
+            </div>
+            ${dead.length ? `<div class="flex flex-wrap gap-1.5 pt-2 border-t border-indigo-950">${dead.map(p => `<span class="px-2.5 py-1 rounded-lg bg-slate-900/70 text-xs text-slate-500">💀 <span class="line-through">${p.name}</span> (บทบาทปิดลับ)</span>`).join('')}</div>` : ''}
+          </section>
+        `;
+      } else if (g.phase === 'vote') {
+        const myVote = me ? g.votes[me.id] : null;
+        const counts = {};
+        Object.values(g.votes).forEach(t => { if (t && t !== 'skip') counts[t] = (counts[t] || 0) + 1; });
+        stageHtml = `
+          <section class="glass-card rounded-2xl p-5 space-y-4 border-rose-500/35">
+            <div class="flex items-center justify-between">
+              <h2 class="text-lg font-extrabold text-white">🗳️ โหวตเสนอชื่อขึ้นแท่นแก้ต่าง</h2>
+              ${isHost ? '<button id="btnSkipPhase" type="button" class="px-3 py-1.5 rounded-lg bg-amber-500 text-slate-950 text-xs font-extrabold">สรุปผลโหวต →</button>' : ''}
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+              ${alive.map(p => `<button ${me?.alive && !isTv ? `data-vote-target="${p.id}"` : 'disabled'} type="button" class="p-3 rounded-xl border text-left flex items-center justify-between gap-2 ${myVote === p.id ? 'bg-rose-600/30 border-rose-400' : 'bg-[#0b0d1a] border-slate-700'}"><div class="flex items-center gap-2 min-w-0">${renderAvatarBadge(p,'w-7 h-7 text-sm')}<span class="text-xs font-bold truncate">${p.name}</span></div>${counts[p.id] ? `<span class="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[11px] font-bold">${counts[p.id]}</span>` : ''}</button>`).join('')}
+            </div>
+            ${me?.alive && !isTv ? `<button data-vote-target="skip" type="button" class="px-4 py-2 rounded-xl border text-xs font-bold ${myVote === 'skip' ? 'bg-slate-700 border-amber-400' : 'bg-[#0b0d1a] border-slate-700'}">งดออกเสียง (Skip)</button>` : ''}
+          </section>
+        `;
+      } else if (g.phase === 'defense') {
+        const acc = serverState.players.find(p => p.id === g.accusedId);
+        let guilty = 0, innocent = 0;
+        Object.values(g.trialVotes).forEach(v => { if (v === 'guilty') guilty++; else if (v === 'innocent') innocent++; });
+        stageHtml = `
+          <section class="glass-card rounded-3xl p-6 text-center space-y-4 border-purple-500/45 moon-glow">
+            <h2 class="text-xl font-extrabold text-white">⚔️ ${acc?.name} ขึ้นแท่นแก้ต่าง!</h2>
+            <div class="grid grid-cols-2 gap-3 max-w-sm mx-auto">
+              <div class="p-3 rounded-xl bg-rose-950/60 border border-rose-500/40"><div class="text-2xl font-extrabold text-rose-400">${guilty}</div><div class="text-xs">ประหาร</div></div>
+              <div class="p-3 rounded-xl bg-emerald-950/60 border border-emerald-500/40"><div class="text-2xl font-extrabold text-emerald-400">${innocent}</div><div class="text-xs">ปล่อยตัว</div></div>
+            </div>
+            ${me?.alive && !isTv && me.id !== g.accusedId ? `
+              <div class="grid grid-cols-2 gap-3 max-w-sm mx-auto">
+                <button data-trial-vote="guilty" type="button" class="py-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-sm">⚖️ ประหาร</button>
+                <button data-trial-vote="innocent" type="button" class="py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm">🕊️ ปล่อยตัว</button>
+              </div>
+            ` : ''}
+            ${isHost ? '<button id="btnSkipPhase" type="button" class="px-4 py-2 rounded-xl bg-amber-500 text-slate-950 text-xs font-extrabold">สรุปคำตัดสิน →</button>' : ''}
+          </section>
+        `;
+      } else if (g.phase === 'second_chance') {
+        const acc = serverState.players.find(p => p.id === g.accusedId);
+        let execute = 0, spare = 0;
+        Object.values(g.secondChanceVotes).forEach(v => { if (v === 'execute') execute++; else if (v === 'spare') spare++; });
+        stageHtml = `
+          <section class="glass-card rounded-3xl p-6 text-center space-y-4 border-amber-400/60 blood-glow">
+            <h2 class="text-xl font-extrabold text-amber-300">🛡️ SECOND CHANCE — ${acc?.name}</h2>
+            <div class="grid grid-cols-2 gap-3 max-w-sm mx-auto">
+              <div class="p-3 rounded-xl bg-rose-950/60 border border-rose-500/40"><div class="text-2xl font-extrabold text-rose-400">${execute}</div><div class="text-xs">ยืนยันประหาร</div></div>
+              <div class="p-3 rounded-xl bg-amber-950/60 border border-amber-400/40"><div class="text-2xl font-extrabold text-amber-300">${spare}</div><div class="text-xs">ไว้ชีวิต</div></div>
+            </div>
+            ${me?.alive && !isTv && me.id !== g.accusedId ? `
+              <div class="grid grid-cols-2 gap-3 max-w-sm mx-auto">
+                <button data-sc-vote="execute" type="button" class="py-3 rounded-xl bg-rose-600 text-white font-bold text-sm">⚰️ ยืนยันประหาร</button>
+                <button data-sc-vote="spare" type="button" class="py-3 rounded-xl bg-amber-500 text-slate-950 font-bold text-sm">🛡️ ไว้ชีวิต</button>
+              </div>
+            ` : ''}
+            ${isHost ? '<button id="btnSkipPhase" type="button" class="px-4 py-2 rounded-xl bg-slate-800 border border-slate-600 text-white text-xs font-bold">ปิดโหวตทันที →</button>' : ''}
+          </section>
+        `;
+      } else if (g.phase === 'hunter') {
+        const isHunter = me && me.id === g.activeHunterId;
+        stageHtml = `
+          <section class="glass-card rounded-3xl p-6 text-center space-y-4 border-red-500/50 blood-glow">
+            <div class="text-4xl">🏹</div>
+            <h2 class="text-xl font-extrabold text-white">นายพรานยิงนัดสุดท้าย!</h2>
+            ${isHunter ? `<div class="grid grid-cols-2 sm:grid-cols-3 gap-2">${alive.map(p => `<button data-hunter-target="${p.id}" type="button" class="p-3 rounded-xl bg-[#0b0d1a] border border-slate-700 hover:border-red-400 flex items-center gap-2">${renderAvatarBadge(p,'w-7 h-7 text-sm')}<span class="text-xs font-bold">${p.name}</span></button>`).join('')}</div>` : '<p class="text-xs text-slate-400">กำลังรอนายพรานเลือกลั่นไก...</p>'}
+          </section>
+        `;
+      } else if (g.phase === 'gameover') {
+        const w = g.winner;
+        const cardsHtml = serverState.players.map(p => {
+          const r = ROLES[p.role] || ROLES.villager;
+          const guessId = g.ghostGuesses?.[p.id];
+          const gTarget = guessId ? serverState.players.find(x => x.id === guessId) : null;
+          const gBadge = gTarget ? (['werewolf','wolfcub'].includes(gTarget.role) ? ' <span class="text-[10px] text-emerald-400">👻🎯 ทายถูก!</span>' : ' <span class="text-[10px] text-slate-500">👻 ทายพลาด</span>') : '';
+          return `
+            <div class="p-3 rounded-xl bg-[#0b0d1a] border border-indigo-900 flex items-center justify-between gap-2">
+              <div class="flex items-center gap-2.5 min-w-0">
+                ${renderAvatarBadge(p,'w-8 h-8 text-base')}
+                <div class="min-w-0"><div class="text-sm font-bold text-white truncate">${p.name} ${p.isLover ? '💘' : ''}</div><div class="text-[11px] text-slate-400">${p.alive ? 'รอดชีวิต' : '💀 เสียชีวิต'}${gBadge}</div></div>
+              </div>
+              <span class="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-xs font-bold ${r.team === 'dark' ? 'text-rose-300' : r.team === 'neutral' ? 'text-orange-300' : 'text-sky-300'}">${r.icon} ${r.nameEn} (${r.nameTh})</span>
+            </div>
+          `;
+        }).join('');
+
+        stageHtml = `
+          ${ui.gameoverModalOpen ? `
+            <div class="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-5">
+              <div class="glass-card rounded-3xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden border-2 border-amber-400/60 animate-center-reveal">
+                <div class="p-5 text-center border-b border-indigo-950 space-y-1">
+                  <div class="text-[11px] font-bold tracking-[0.25em] text-amber-300 uppercase">GAME OVER • เฉลยบทบาททุกคน</div>
+                  <h2 class="font-display text-2xl sm:text-3xl font-extrabold text-white">${w.title}</h2>
+                  <p class="text-xs sm:text-sm text-slate-300">${w.subtitle}</p>
+                </div>
+                <div class="p-4 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-2.5">${cardsHtml}</div>
+                <div class="p-4 border-t border-indigo-950 flex justify-center gap-2.5">
+                  ${isHost ? '<button id="btnReturnLobby" type="button" class="px-5 py-2.5 rounded-xl bg-amber-500 text-slate-950 font-extrabold text-sm">🔄 เล่นรอบใหม่ (ห้องเดิม)</button>' : ''}
+                  <button id="btnCloseGameoverModal" type="button" class="px-4 py-2.5 rounded-xl bg-slate-800 text-slate-200 text-xs font-bold">ดูบันทึกเหตุการณ์</button>
+                </div>
+              </div>
+            </div>
+          ` : ''}
+          <section class="glass-card rounded-3xl p-6 text-center space-y-4">
+            <h2 class="font-display text-2xl font-extrabold text-white">${w.title}</h2>
+            <p class="text-sm text-slate-300">${w.subtitle}</p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-left">${cardsHtml}</div>
+            ${isHost ? '<button id="btnReturnLobby2" type="button" class="px-6 py-3 rounded-xl bg-amber-500 text-slate-950 font-extrabold text-sm">🔄 กลับหน้าล็อบบี้ห้องเดิม</button>' : ''}
+          </section>
+        `;
+      }
+
+      return `
+        <div class="space-y-4">
+          <section class="glass-card rounded-2xl p-4 space-y-3">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <span class="px-2.5 py-1 rounded-lg bg-indigo-500/20 border border-indigo-500/35 text-xs font-bold text-indigo-200">${phaseNames[g.phase] || g.phase}</span>
+              <div class="flex items-center gap-2">
+                ${isHost && showTimer ? `<button id="btnPauseTimer" type="button" class="px-2.5 py-1 rounded-lg bg-slate-800 text-xs font-bold">${g.paused ? '▶ เล่นต่อ' : '⏸ พักเวลา'}</button>` : ''}
+                ${isHost ? '<button id="btnReturnLobbyTop" type="button" class="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-xs">กลับล็อบบี้</button>' : ''}
+              </div>
+            </div>
+            ${showTimer ? `
+              <div class="space-y-1">
+                <div class="flex justify-between text-xs"><span class="text-slate-400">เวลาคงเหลือ</span><span id="liveTimerText" class="font-mono font-extrabold text-amber-300">--</span></div>
+                <div class="h-2 rounded-full bg-slate-800 overflow-hidden"><div id="liveTimerBar" class="h-full bg-gradient-to-r from-amber-400 to-rose-500 transition-all duration-700" style="width:100%"></div></div>
+              </div>
+            ` : ''}
+            ${me && !isTv && myRole && !['role_reveal','gameover'].includes(g.phase) ? `
+              <div class="pt-2 border-t border-indigo-950 flex items-center justify-between text-xs">
+                <span>${me.avatar} <strong>${me.name}</strong> ${!me.alive ? '<span class="text-rose-400">(💀 เสียชีวิต)</span>' : ''}</span>
+                <button id="btnPeekRoleMini" type="button" class="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-amber-300 font-semibold">
+                  ${ui.roleCardRevealed ? `${myRole.icon} ${myRole.nameEn}` : '👁️ แตะดูบทบาทตัวเอง'}
+                </button>
+              </div>
+            ` : ''}
+          </section>
+
+          ${stageHtml}
+
+          ${me && !me.alive && !isTv && !['role_reveal','gameover'].includes(g.phase) ? `
+            <section class="glass-card rounded-2xl p-4 space-y-2.5 border-indigo-500/35">
+              <div class="text-xs font-bold text-indigo-300">👻 โหมดวิญญาณนักสืบ — ทายลับๆ ว่าใครคือหมาป่า (เฉลยตอนจบเกม)</div>
+              <div class="flex flex-wrap gap-1.5">
+                ${alive.map(p => `<button data-ghost-guess="${p.id}" type="button" class="px-2.5 py-1.5 rounded-lg border text-xs font-semibold ${g.myGhostGuess === p.id ? 'bg-amber-500/25 border-amber-400 text-amber-200' : 'bg-[#0b0d1a] border-slate-700 text-slate-300'}">${p.avatar} ${p.name}</button>`).join('')}
+              </div>
+            </section>
+          ` : ''}
+
+          ${g.logs?.length && g.phase !== 'role_reveal' ? `
+            <section class="glass-card rounded-2xl p-4 space-y-2">
+              <h3 class="text-xs font-bold uppercase text-slate-400">📜 บันทึกเหตุการณ์หมู่บ้าน</h3>
+              <div class="space-y-1.5 max-h-40 overflow-y-auto">${g.logs.map(l => `<div class="text-xs text-slate-300 bg-[#0b0d1a] px-3 py-2 rounded-lg border border-indigo-950">${l.phaseIcon} ${l.text}</div>`).join('')}</div>
+            </section>
+          ` : ''}
+        </div>
+      `;
+    }
+
+    function bindGameEvents() {
+      document.getElementById('btnToggleSecretCard')?.addEventListener('click', () => { ui.roleCardRevealed = !ui.roleCardRevealed; render(); });
+      document.getElementById('btnPeekRoleMini')?.addEventListener('click', () => { ui.roleCardRevealed = !ui.roleCardRevealed; render(); });
+      document.getElementById('btnSkipPhase')?.addEventListener('click', () => socket.emit('game:skipPhase'));
+      document.getElementById('btnPauseTimer')?.addEventListener('click', () => socket.emit('game:togglePause'));
+      document.getElementById('btnReturnLobby')?.addEventListener('click', () => socket.emit('game:returnLobby'));
+      document.getElementById('btnReturnLobby2')?.addEventListener('click', () => socket.emit('game:returnLobby'));
+      document.getElementById('btnReturnLobbyTop')?.addEventListener('click', () => socket.emit('game:returnLobby'));
+      document.getElementById('btnCloseGameoverModal')?.addEventListener('click', () => { ui.gameoverModalOpen = false; render(); });
+
+      document.getElementById('btnDecoyTap')?.addEventListener('click', () => {
+        ui.decoyTapCount += 1;
+        AudioEngine.playTone(420 + (ui.decoyTapCount % 5) * 35, 0.05, 'sine', 0.03, 0);
+        const btn = document.getElementById('btnDecoyTap');
+        if (btn) btn.textContent = `🌙 แตะจับแสงจันทร์ (${ui.decoyTapCount})`;
+      });
+
+      document.querySelectorAll('[data-night-target]').forEach(b => b.addEventListener('click', () => socket.emit('game:nightAction', { actionType: 'target', targetId: b.dataset.nightTarget })));
+      document.getElementById('btnConfirmCupid')?.addEventListener('click', () => socket.emit('game:nightAction', { actionType: 'confirm_cupid' }));
+      document.querySelectorAll('[data-wolf-target]').forEach(b => b.addEventListener('click', () => socket.emit('game:nightAction', { actionType: 'toggle_wolf_target', targetId: b.dataset.wolfTarget })));
+      document.getElementById('btnConfirmWolf')?.addEventListener('click', () => socket.emit('game:nightAction', { actionType: 'confirm_wolf' }));
+      document.querySelectorAll('[data-witch-heal]').forEach(b => b.addEventListener('click', () => socket.emit('game:nightAction', { actionType: 'heal', targetId: b.dataset.witchHeal })));
+      document.querySelectorAll('[data-witch-poison]').forEach(b => b.addEventListener('click', () => socket.emit('game:nightAction', { actionType: 'poison', targetId: b.dataset.witchPoison })));
+      document.getElementById('btnWitchDone')?.addEventListener('click', () => socket.emit('game:nightAction', { actionType: 'done' }));
+      document.getElementById('btnNightSkip')?.addEventListener('click', () => socket.emit('game:nightAction', { actionType: 'skip' }));
+
+      document.querySelectorAll('[data-vote-target]').forEach(b => b.addEventListener('click', () => socket.emit('game:vote', { targetId: b.dataset.voteTarget })));
+      document.querySelectorAll('[data-trial-vote]').forEach(b => b.addEventListener('click', () => socket.emit('game:trialVote', { verdict: b.dataset.trialVote })));
+      document.querySelectorAll('[data-sc-vote]').forEach(b => b.addEventListener('click', () => socket.emit('game:secondChanceVote', { decision: b.dataset.scVote })));
+      document.querySelectorAll('[data-hunter-target]').forEach(b => b.addEventListener('click', () => socket.emit('game:hunterShot', { targetId: b.dataset.hunterTarget })));
+      document.querySelectorAll('[data-ghost-guess]').forEach(b => b.addEventListener('click', () => {
+        socket.emit('game:ghostGuess', { targetId: b.dataset.ghostGuess });
+        showToast('👻 บันทึกคำทายแล้ว!', 'info');
+      }));
+    }
+
+    // Global Controls
+    document.getElementById('btnLogoHome').addEventListener('click', () => {
+      try { localStorage.removeItem('mooncourt_session'); } catch (e) {}
+      window.location.href = '/';
+    });
+    document.getElementById('btnRoomBadge').addEventListener('click', openQrModal);
+    document.getElementById('btnCloseQrModal').addEventListener('click', () => document.getElementById('qrModal').classList.add('hidden'));
+    document.getElementById('btnCopyJoinLink').addEventListener('click', () => copyText(`${window.location.origin}/?room=${serverState.roomCode}`, 'คัดลอกลิงก์เข้าห้องแล้ว!'));
+    document.getElementById('btnCopyTvLink').addEventListener('click', () => copyText(`${window.location.origin}/?tv=${serverState.roomCode}`, 'คัดลอกลิงก์จอกลางวง (TV) แล้ว!'));
+    document.getElementById('btnToggleAudio').addEventListener('click', () => {
+      AudioEngine.enabled = !AudioEngine.enabled;
+      document.getElementById('audioIcon').textContent = AudioEngine.enabled ? '🔊' : '🔇';
+      document.getElementById('audioLabel').textContent = AudioEngine.enabled ? 'เสียงเปิด' : 'เสียงปิด';
+    });
+    document.getElementById('btnOpenRules').addEventListener('click', () => {
+      document.getElementById('rulesModalBody').innerHTML = ROLE_ORDER_LIST.map(id => {
+        const r = ROLES[id];
+        return `<div class="p-3 rounded-xl bg-[#0b0d1a] border border-indigo-950"><div class="font-bold text-white">${r.icon} ${r.nameEn} (${r.nameTh})</div><div class="text-slate-400 mt-0.5">${r.desc}</div></div>`;
+      }).join('');
+      document.getElementById('rulesModal').classList.remove('hidden');
+    });
+    document.getElementById('btnCloseRules').addEventListener('click', () => document.getElementById('rulesModal').classList.add('hidden'));
+
+    render();
+  </script>
+</body>
+</html>
