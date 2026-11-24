@@ -9,7 +9,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: '*' },
-  maxHttpBufferSize: 3e6 // Allow up to ~3MB for optional custom avatar images
+  maxHttpBufferSize: 3e6
 });
 
 const PORT = process.env.PORT || 3000;
@@ -25,8 +25,6 @@ const ROLE_ORDER_LIST = [
   'defender', 'seer', 'witch', 'hunter', 'cupid', 'spellcaster', 'revealer', 'huntress', 'villager',
   'tanner'
 ];
-
-const NIGHT_STEPS_ORDER = ['cupid', 'wolfpack', 'defender', 'seer', 'witch', 'spellcaster', 'revealer', 'huntress'];
 
 const NIGHT_EVENTS = [
   { id: 'full_moon', icon: '🌕', name: 'คืนจันทร์เต็มดวง (Full Moon)', desc: 'ค่ำคืนปกติ ไม่มีผลพิเศษ ทุกคนใช้พลังได้ตามกติกา' },
@@ -47,7 +45,7 @@ const AVATAR_GALLERY = [
   '🐯', '🐸', '🐙', '🦋', '🦅', '🦄'
 ];
 
-const rooms = new Map(); // roomCode -> Room Object
+const rooms = new Map();
 
 // ============================================================================
 // 2. HELPERS
@@ -85,23 +83,48 @@ function getAlivePlayers(room) {
   return room.players.filter(p => p.alive);
 }
 
+// All alive players who have an active night ability tonight (simultaneous night!)
+function getActiveNightActors(room) {
+  const round = room.game.round;
+  return room.players.filter(p => {
+    if (!p.alive) return false;
+    if (isWolfRole(p.role)) return true;
+    if (p.role === 'cupid') return round === 1;
+    if (['defender', 'seer', 'witch', 'spellcaster', 'revealer'].includes(p.role)) return true;
+    if (p.role === 'huntress') return !p.huntressUsed;
+    return false;
+  });
+}
+
+// Strict Unanimous Consensus: ONLY targets chosen by EVERY alive werewolf/wolfcub succeed!
+function computeUnanimousWolfTargets(room) {
+  const aliveWolves = room.players.filter(p => p.alive && isWolfRole(p.role));
+  if (aliveWolves.length === 0) return [];
+  const votesMap = room.game.nightActions.wolfVotesByPlayer || {};
+  const firstPicks = votesMap[aliveWolves[0].id] || [];
+  if (firstPicks.length === 0) return [];
+  return firstPicks.filter(targetId =>
+    aliveWolves.every(w => (votesMap[w.id] || []).includes(targetId))
+  );
+}
+
 function createRoomObject(roomCode, hostPlayer) {
   return {
     roomCode,
     createdAt: Date.now(),
     lastActivity: Date.now(),
-    view: 'lobby', // 'lobby' | 'game'
+    view: 'lobby',
     players: [hostPlayer],
     tvSockets: new Set(),
     deck: {
-      werewolf: 1,
+      werewolf: 2,
       wolfcub: 0,
       defender: 1,
       seer: 1,
-      witch: 0,
-      hunter: 1,
+      witch: 1,
+      hunter: 0,
       cupid: 0,
-      spellcaster: 0,
+      spellcaster: 1,
       revealer: 0,
       huntress: 0,
       tanner: 0,
@@ -135,12 +158,9 @@ function createIdleGameState() {
     silencedPlayerId: null,
     currentNightEvent: null,
     ghostGuesses: {},
-    nightQueue: [],
-    nightStepIndex: 0,
-    currentNightStep: null,
     nightActions: {
       cupidPicks: [],
-      wolfTargets: [],
+      wolfVotesByPlayer: {}, // wolfId -> [targetId, ...]
       defenderTargetId: null,
       seerTargetId: null,
       seerResult: null,
@@ -151,7 +171,7 @@ function createIdleGameState() {
       spellcasterTargetId: null,
       revealerTargetId: null,
       huntressTargetId: null,
-      submittedBy: {}
+      submittedBy: {}        // playerId -> true
     },
     dawnDeaths: [],
     dawnSteps: [],
@@ -180,7 +200,6 @@ function buildPersonalizedState(room, viewerId, isTv = false) {
   const viewer = isTv ? null : room.players.find(p => p.id === viewerId) || null;
   const viewerIsWolf = viewer && isWolfRole(viewer.role);
 
-  // Public player list: NEVER expose other players' roles until gameover!
   const sanitizedPlayers = room.players.map(p => {
     const canSeeRole = isOver || (viewer && p.id === viewer.id);
     return {
@@ -200,31 +219,49 @@ function buildPersonalizedState(room, viewerId, isTv = false) {
     };
   });
 
-  // Private night payload ONLY for the currently active role on this phone
+  // Simultaneous Night Payload for THIS specific player
+  const activeActors = g.phase === 'night' ? getActiveNightActors(room) : [];
+  const submittedCount = activeActors.filter(p => g.nightActions.submittedBy[p.id]).length;
+
   let privateNight = null;
   if (!isTv && viewer && viewer.alive && g.phase === 'night') {
-    const step = g.currentNightStep;
-    const isMyTurn = step === 'wolfpack' ? isWolfRole(viewer.role) : viewer.role === step;
-    if (isMyTurn) {
+    const isActor = activeActors.some(p => p.id === viewer.id);
+    if (isActor) {
+      const roleKey = isWolfRole(viewer.role) ? 'wolfpack' : viewer.role;
       privateNight = {
-        step,
+        step: roleKey,
         submitted: Boolean(g.nightActions.submittedBy[viewer.id])
       };
-      if (step === 'cupid') {
+      if (roleKey === 'cupid') {
         privateNight.cupidPicks = g.nightActions.cupidPicks;
-      } else if (step === 'wolfpack') {
-        privateNight.wolfTargets = g.nightActions.wolfTargets;
+      } else if (roleKey === 'wolfpack') {
+        const aliveWolves = room.players.filter(p => p.alive && isWolfRole(p.role));
         privateNight.maxKills = g.wolfCubRageRound === g.round ? 2 : 1;
-      } else if (step === 'defender') {
+        privateNight.myWolfTargets = g.nightActions.wolfVotesByPlayer[viewer.id] || [];
+        privateNight.packVotes = aliveWolves.map(w => ({
+          wolfId: w.id,
+          wolfName: w.name,
+          targets: g.nightActions.wolfVotesByPlayer[w.id] || [],
+          submitted: Boolean(g.nightActions.submittedBy[w.id])
+        }));
+        privateNight.unanimousTargets = computeUnanimousWolfTargets(room);
+      } else if (roleKey === 'defender') {
         privateNight.protectedLastNight = viewer.protectedLastNight;
-      } else if (step === 'seer') {
+        privateNight.selectedTargetId = g.nightActions.defenderTargetId;
+      } else if (roleKey === 'seer') {
         privateNight.seerResult = g.nightActions.seerResult;
-      } else if (step === 'witch') {
-        privateNight.wolfVictims = g.nightActions.wolfTargets;
+      } else if (roleKey === 'witch') {
         privateNight.witchHealUsed = g.nightActions.witchHealUsed;
         privateNight.witchPoisonUsed = g.nightActions.witchPoisonUsed;
-      } else if (step === 'huntress') {
+        privateNight.witchHealedId = g.nightActions.witchHealedId;
+        privateNight.witchPoisonTargetId = g.nightActions.witchPoisonTargetId;
+      } else if (roleKey === 'spellcaster') {
+        privateNight.selectedTargetId = g.nightActions.spellcasterTargetId;
+      } else if (roleKey === 'revealer') {
+        privateNight.selectedTargetId = g.nightActions.revealerTargetId;
+      } else if (roleKey === 'huntress') {
         privateNight.huntressUsed = viewer.huntressUsed;
+        privateNight.selectedTargetId = g.nightActions.huntressTargetId;
       }
     }
   }
@@ -245,8 +282,8 @@ function buildPersonalizedState(room, viewerId, isTv = false) {
       paused: g.paused,
       silencedPlayerId: g.silencedPlayerId,
       currentNightEvent: g.currentNightEvent,
-      nightStepIndex: g.nightStepIndex,
-      nightQueueLength: g.nightQueue.length,
+      nightSubmittedCount: submittedCount,
+      nightTotalActors: activeActors.length,
       privateNight,
       dawnSteps: g.dawnSteps,
       votes: g.votes,
@@ -265,9 +302,7 @@ function buildPersonalizedState(room, viewerId, isTv = false) {
 function broadcastRoom(room) {
   room.lastActivity = Date.now();
   room.players.forEach(p => {
-    if (p.socketId) {
-      io.to(p.socketId).emit('room:state', buildPersonalizedState(room, p.id, false));
-    }
+    if (p.socketId) io.to(p.socketId).emit('room:state', buildPersonalizedState(room, p.id, false));
   });
   room.tvSockets.forEach(sid => {
     io.to(sid).emit('room:state', buildPersonalizedState(room, null, true));
@@ -276,16 +311,12 @@ function broadcastRoom(room) {
 
 function broadcastAudioCue(room, cue, speakText = '') {
   const payload = { cue, speakText };
-  room.players.forEach(p => {
-    if (p.socketId) io.to(p.socketId).emit('room:audio', payload);
-  });
-  room.tvSockets.forEach(sid => {
-    io.to(sid).emit('room:audio', payload);
-  });
+  room.players.forEach(p => { if (p.socketId) io.to(p.socketId).emit('room:audio', payload); });
+  room.tvSockets.forEach(sid => io.to(sid).emit('room:audio', payload));
 }
 
 // ============================================================================
-// 4. SERVER-SIDE AUTOMATIC MODERATOR ENGINE
+// 4. SERVER-SIDE AUTOMATIC MODERATOR ENGINE (SIMULTANEOUS NIGHT!)
 // ============================================================================
 function stopRoomTimer(room) {
   if (room.interval) {
@@ -304,7 +335,6 @@ function startRoomCountdown(room, seconds, onComplete) {
   room.interval = setInterval(() => {
     if (room.game.paused || room.view !== 'game') return;
     room.game.timerRemaining -= 1;
-    // Emit lightweight timer tick to all clients
     const tick = { remaining: room.game.timerRemaining, total: room.game.timerTotal, paused: room.game.paused };
     room.players.forEach(p => { if (p.socketId) io.to(p.socketId).emit('room:tick', tick); });
     room.tvSockets.forEach(sid => io.to(sid).emit('room:tick', tick));
@@ -352,42 +382,18 @@ function startGameOnServer(room) {
   addLog(room, '👁️', `เฟสที่ 1: ระบบ Auto-Moderator แจกบทบาทลับให้ผู้เล่น ${room.players.length} คนเรียบร้อย (Host ร่วมเล่นด้วย)`);
   broadcastAudioCue(room, 'night', `เปิดดูบทบาทลับของตนเอง มีเวลา ${room.timers.roleReveal} วินาที`);
 
-  startRoomCountdown(room, room.timers.roleReveal, () => {
-    beginNightPhase(room);
-  });
+  startRoomCountdown(room, room.timers.roleReveal, () => beginNightPhase(room));
   return null;
-}
-
-function getStepActors(room, stepId) {
-  if (stepId === 'wolfpack') return room.players.filter(p => p.alive && isWolfRole(p.role));
-  return room.players.filter(p => p.alive && p.role === stepId);
 }
 
 function beginNightPhase(room) {
   stopRoomTimer(room);
   const g = room.game;
 
-  const queue = NIGHT_STEPS_ORDER.filter(stepId => {
-    if (stepId === 'cupid') {
-      if (g.round > 1 || (room.deck.cupid || 0) === 0) return false;
-      return room.timers.antiMetaFixedNight || room.players.some(p => p.alive && p.role === 'cupid');
-    }
-    if (stepId === 'wolfpack') {
-      return room.players.some(p => p.alive && isWolfRole(p.role));
-    }
-    if ((room.deck[stepId] || 0) === 0) return false;
-    if (!room.timers.antiMetaFixedNight) {
-      return room.players.some(p => p.alive && p.role === stepId);
-    }
-    return true;
-  });
-
   g.phase = 'night';
-  g.nightQueue = queue;
-  g.nightStepIndex = 0;
   g.silencedPlayerId = null;
   g.nightActions.cupidPicks = [];
-  g.nightActions.wolfTargets = [];
+  g.nightActions.wolfVotesByPlayer = {};
   g.nightActions.defenderTargetId = null;
   g.nightActions.seerTargetId = null;
   g.nightActions.seerResult = null;
@@ -405,55 +411,44 @@ function beginNightPhase(room) {
     g.currentNightEvent = null;
   }
 
-  broadcastAudioCue(room, 'night', `เข้าสู่คืนที่ ${g.round} ทุกคนหลับตา`);
-  runCurrentNightStep(room);
-}
+  broadcastAudioCue(room, 'night', `เข้าสู่คืนที่ ${g.round} ทุกบทบาทที่มีพลังกลางคืนสามารถเลือกใช้พลังพร้อมกันได้ทันที`);
 
-function runCurrentNightStep(room) {
-  stopRoomTimer(room);
-  const g = room.game;
-  if (g.nightStepIndex >= g.nightQueue.length) {
-    resolveNightToDawn(room);
-    return;
-  }
+  // Trigger all Bot night actors cleanly
+  runAllBotNightActions(room);
 
-  const stepId = g.nightQueue[g.nightStepIndex];
-  g.currentNightStep = stepId;
-  g.nightActions.submittedBy = {};
-
-  runBotNightActions(room, stepId);
-
-  const aliveHumanActors = getStepActors(room, stepId).filter(p => !p.isBot);
   const bonusSec = g.currentNightEvent?.id === 'blood_moon' ? 10 : 0;
-  let stepSeconds = room.timers.nightAction + bonusSec;
-  if (aliveHumanActors.length === 0 && !room.timers.antiMetaFixedNight) {
-    stepSeconds = Math.min(stepSeconds, 3);
-  }
+  const nightSeconds = room.timers.nightAction + bonusSec;
+  startRoomCountdown(room, nightSeconds, () => resolveNightToDawn(room));
 
-  startRoomCountdown(room, stepSeconds, () => finalizeNightStep(room, stepId));
+  // If no human has a night role and anti-meta is off, finish cleanly after 3s
+  const humanActors = getActiveNightActors(room).filter(p => !p.isBot);
+  if (humanActors.length === 0 && !room.timers.antiMetaFixedNight) {
+    g.timerRemaining = Math.min(nightSeconds, 3);
+    g.timerTotal = Math.min(nightSeconds, 3);
+    broadcastRoom(room);
+  }
 }
 
-function runBotNightActions(room, stepId) {
+function runAllBotNightActions(room) {
   const g = room.game;
-  const actors = getStepActors(room, stepId).filter(p => p.isBot);
-  if (actors.length === 0) return;
   const alive = getAlivePlayers(room);
+  const botActors = getActiveNightActors(room).filter(p => p.isBot);
+  const maxWolfKills = g.wolfCubRageRound === g.round ? 2 : 1;
 
-  actors.forEach(bot => {
-    if (stepId === 'cupid') {
+  // Shared preferred target for bot wolves so they coordinate
+  const nonWolves = shuffle(alive.filter(p => !isWolfRole(p.role)));
+  const botWolfDefaultPicks = nonWolves.slice(0, maxWolfKills).map(p => p.id);
+
+  botActors.forEach(bot => {
+    if (bot.role === 'cupid' && g.round === 1) {
       const sh = shuffle(alive);
       if (sh.length >= 2) g.nightActions.cupidPicks = [sh[0].id, sh[1].id];
-    } else if (stepId === 'wolfpack') {
-      const maxKills = g.wolfCubRageRound === g.round ? 2 : 1;
-      const nonWolves = shuffle(alive.filter(p => !isWolfRole(p.role)));
-      for (const t of nonWolves) {
-        if (g.nightActions.wolfTargets.length >= maxKills) break;
-        if (!g.nightActions.wolfTargets.includes(t.id)) g.nightActions.wolfTargets.push(t.id);
-      }
-    } else if (stepId === 'defender') {
+    } else if (isWolfRole(bot.role)) {
+      g.nightActions.wolfVotesByPlayer[bot.id] = [...botWolfDefaultPicks];
+    } else if (bot.role === 'defender') {
       const cands = alive.filter(p => p.id !== bot.protectedLastNight);
       if (cands.length > 0) g.nightActions.defenderTargetId = cands[Math.floor(Math.random() * cands.length)].id;
-    } else if (stepId === 'seer') {
+    } else if (bot.role === 'seer') {
       const others = alive.filter(p => p.id !== bot.id);
       if (others.length > 0) {
         const pick = others[Math.floor(Math.random() * others.length)];
@@ -461,28 +456,27 @@ function runBotNightActions(room, stepId) {
           bot.seerHistory.push({ targetId: pick.id, isDark: isWolfRole(pick.role), round: g.round });
         }
       }
-    } else if (stepId === 'witch') {
-      const firstVictim = g.nightActions.wolfTargets[0] || null;
-      if (!g.nightActions.witchHealUsed && firstVictim && Math.random() < 0.6) {
-        g.nightActions.witchHealedId = firstVictim;
-        g.nightActions.witchHealUsed = true;
+    } else if (bot.role === 'witch') {
+      if (!g.nightActions.witchHealUsed && Math.random() < 0.5) {
+        const pick = alive[Math.floor(Math.random() * alive.length)];
+        if (pick) { g.nightActions.witchHealedId = pick.id; g.nightActions.witchHealUsed = true; }
       } else if (!g.nightActions.witchPoisonUsed && g.round >= 2 && Math.random() < 0.4) {
-        const targets = alive.filter(p => p.id !== bot.id && !g.nightActions.wolfTargets.includes(p.id));
-        if (targets.length > 0) {
-          g.nightActions.witchPoisonTargetId = targets[Math.floor(Math.random() * targets.length)].id;
+        const others = alive.filter(p => p.id !== bot.id);
+        if (others.length > 0) {
+          g.nightActions.witchPoisonTargetId = others[Math.floor(Math.random() * others.length)].id;
           g.nightActions.witchPoisonUsed = true;
         }
       }
-    } else if (stepId === 'spellcaster') {
+    } else if (bot.role === 'spellcaster') {
       const others = alive.filter(p => p.id !== bot.id);
       if (others.length > 0) g.nightActions.spellcasterTargetId = others[Math.floor(Math.random() * others.length)].id;
-    } else if (stepId === 'revealer') {
-      if (Math.random() < 0.4) {
+    } else if (bot.role === 'revealer') {
+      if (Math.random() < 0.35) {
         const others = alive.filter(p => p.id !== bot.id);
         if (others.length > 0) g.nightActions.revealerTargetId = others[Math.floor(Math.random() * others.length)].id;
       }
-    } else if (stepId === 'huntress') {
-      if (!bot.huntressUsed && g.round >= 2 && Math.random() < 0.45) {
+    } else if (bot.role === 'huntress') {
+      if (!bot.huntressUsed && g.round >= 2 && Math.random() < 0.4) {
         const others = alive.filter(p => p.id !== bot.id);
         if (others.length > 0) {
           g.nightActions.huntressTargetId = others[Math.floor(Math.random() * others.length)].id;
@@ -494,18 +488,14 @@ function runBotNightActions(room, stepId) {
   });
 }
 
-function finalizeNightStep(room, stepId) {
-  stopRoomTimer(room);
-  const g = room.game;
-  if (stepId === 'cupid' && g.nightActions.cupidPicks.length === 2) {
-    g.lovers = [...g.nightActions.cupidPicks];
+function checkNightComplete(room) {
+  if (room.game.phase !== 'night') return;
+  if (room.timers.antiMetaFixedNight) return;
+  const activeActors = getActiveNightActors(room);
+  const allDone = activeActors.every(p => Boolean(room.game.nightActions.submittedBy[p.id]));
+  if (allDone) {
+    resolveNightToDawn(room);
   }
-  if (stepId === 'defender') {
-    const def = room.players.find(p => p.alive && p.role === 'defender');
-    if (def) def.protectedLastNight = g.nightActions.defenderTargetId;
-  }
-  g.nightStepIndex += 1;
-  runCurrentNightStep(room);
 }
 
 function applyDeathWithSideEffects(room, playerId, cause, deathsCollector, fallenHuntersCollector) {
@@ -530,18 +520,32 @@ function resolveNightToDawn(room) {
   stopRoomTimer(room);
   const g = room.game;
   const na = g.nightActions;
+
+  // Apply Cupid lovers if chosen on Night 1
+  if (g.round === 1 && na.cupidPicks.length === 2) {
+    g.lovers = [...na.cupidPicks];
+  }
+
+  // Record Defender's protected target for next night's no-repeat rule
+  const def = room.players.find(p => p.alive && p.role === 'defender');
+  if (def) def.protectedLastNight = na.defenderTargetId;
+
   const deaths = [];
   const fallenHunters = [];
 
-  na.wolfTargets.forEach(targetId => {
+  // 1. Werewolf / Wolf Cub UNANIMOUS attacks only!
+  const unanimousTargets = computeUnanimousWolfTargets(room);
+  unanimousTargets.forEach(targetId => {
     const saved = na.defenderTargetId === targetId || na.witchHealedId === targetId;
     if (!saved) applyDeathWithSideEffects(room, targetId, '🐺 ถูกฝูงหมาป่าสังหารในความมืด', deaths, fallenHunters);
   });
 
+  // 2. Witch Poison
   if (na.witchPoisonTargetId) {
     applyDeathWithSideEffects(room, na.witchPoisonTargetId, '🧪 เสียชีวิตจากน้ำยาพิษของแม่มด', deaths, fallenHunters);
   }
 
+  // 3. Revealer check
   if (na.revealerTargetId) {
     const revPlayer = room.players.find(p => p.alive && p.role === 'revealer');
     const target = room.players.find(p => p.id === na.revealerTargetId);
@@ -554,10 +558,12 @@ function resolveNightToDawn(room) {
     }
   }
 
+  // 4. Huntress arrow
   if (na.huntressTargetId) {
     applyDeathWithSideEffects(room, na.huntressTargetId, '🌙 เสียชีวิตอย่างปริศนาในความมืด', deaths, fallenHunters);
   }
 
+  // 5. Spellcaster silence
   let silencedPlayer = null;
   if (na.spellcasterTargetId) {
     const target = room.players.find(p => p.id === na.spellcasterTargetId && p.alive);
@@ -735,7 +741,6 @@ function startVotingPhase(room) {
 
   startRoomCountdown(room, room.timers.voting, () => resolveNominationVote(room));
 
-  // Bot nominations
   setTimeout(() => {
     if (room.game.phase !== 'vote') return;
     const alive = getAlivePlayers(room);
@@ -895,11 +900,11 @@ function checkWinConditions(room) {
     });
     return true;
   }
-  if (aliveDark >= aliveVillage) {
+  if (aliveDark > aliveVillage) {
     triggerGameOver(room, {
       team: 'dark',
       title: '🐺 THE DARK SIDE WINS!',
-      subtitle: 'จำนวนฝ่ายหมาป่าเท่ากับหรือมากกว่าชาวบ้าน หมู่บ้านตกอยู่ในความมืดมิด'
+      subtitle: 'จำนวนฝ่ายหมาป่าเหลือมากกว่าฝ่ายชาวบ้าน หมู่บ้านตกอยู่ในความมืดมิด'
     });
     return true;
   }
@@ -920,7 +925,6 @@ function triggerGameOver(room, winner) {
 io.on('connection', (socket) => {
   socket.data = { roomCode: null, playerId: null, isTv: false };
 
-  // Create Room (Host plays too!)
   socket.on('room:create', ({ nickname, avatar, customAvatarUrl }, cb) => {
     const roomCode = genRoomCode();
     const playerId = uid('host');
@@ -948,7 +952,6 @@ io.on('connection', (socket) => {
     broadcastRoom(room);
   });
 
-  // Join Room by 6-digit Room Code
   socket.on('room:join', ({ roomCode, nickname, avatar, customAvatarUrl }, cb) => {
     const code = String(roomCode || '').replace(/\D/g, '').slice(0, 6);
     const room = rooms.get(code);
@@ -958,7 +961,7 @@ io.on('connection', (socket) => {
 
     const playerId = uid('usr');
     const sessionToken = uid('tok');
-    const newPlayer = {
+    room.players.push({
       id: playerId,
       sessionToken,
       socketId: socket.id,
@@ -972,15 +975,13 @@ io.on('connection', (socket) => {
       protectedLastNight: null,
       seerHistory: [],
       huntressUsed: false
-    };
-    room.players.push(newPlayer);
+    });
 
     socket.data = { roomCode: code, playerId, isTv: false };
     cb?.({ ok: true, roomCode: code, playerId, sessionToken });
     broadcastRoom(room);
   });
 
-  // Auto-Reconnect on phone refresh / wake
   socket.on('room:reconnect', ({ roomCode, sessionToken }, cb) => {
     const room = rooms.get(String(roomCode || ''));
     if (!room) return cb?.({ ok: false });
@@ -992,7 +993,6 @@ io.on('connection', (socket) => {
     broadcastRoom(room);
   });
 
-  // Join as Public TV / Center Table Display (Read-only, zero secrets)
   socket.on('table:join', ({ roomCode }, cb) => {
     const code = String(roomCode || '').replace(/\D/g, '').slice(0, 6);
     const room = rooms.get(code);
@@ -1003,7 +1003,6 @@ io.on('connection', (socket) => {
     broadcastRoom(room);
   });
 
-  // Lobby Host Actions
   function getHostRoom() {
     const room = rooms.get(socket.data.roomCode);
     if (!room) return null;
@@ -1083,11 +1082,7 @@ io.on('connection', (socket) => {
     room.view = 'lobby';
     room.game = createIdleGameState();
     room.players.forEach(p => {
-      p.role = null;
-      p.alive = true;
-      p.protectedLastNight = null;
-      p.seerHistory = [];
-      p.huntressUsed = false;
+      p.role = null; p.alive = true; p.protectedLastNight = null; p.seerHistory = []; p.huntressUsed = false;
     });
     broadcastRoom(room);
   });
@@ -1104,6 +1099,7 @@ io.on('connection', (socket) => {
     if (!room || room.view !== 'game') return;
     const p = room.game.phase;
     if (p === 'role_reveal') beginNightPhase(room);
+    else if (p === 'night') resolveNightToDawn(room);
     else if (p === 'dawn') proceedFromDawn(room);
     else if (p === 'day') startVotingPhase(room);
     else if (p === 'vote') resolveNominationVote(room);
@@ -1111,7 +1107,7 @@ io.on('connection', (socket) => {
     else if (p === 'second_chance') resolveSecondChance(room);
   });
 
-  // Night Action from Player Phone
+  // Simultaneous Night Action Handler
   socket.on('game:nightAction', ({ actionType, targetId }) => {
     const room = rooms.get(socket.data.roomCode);
     if (!room || room.game.phase !== 'night') return;
@@ -1119,86 +1115,84 @@ io.on('connection', (socket) => {
     if (!player || !player.alive) return;
 
     const g = room.game;
-    const step = g.currentNightStep;
+    const na = g.nightActions;
 
-    if (step === 'cupid' && player.role === 'cupid') {
+    if (player.role === 'cupid' && g.round === 1) {
       if (actionType === 'target') {
-        const picks = g.nightActions.cupidPicks;
-        if (picks.includes(targetId)) g.nightActions.cupidPicks = picks.filter(id => id !== targetId);
-        else if (picks.length < 2) picks.push(targetId);
+        if (na.cupidPicks.includes(targetId)) na.cupidPicks = na.cupidPicks.filter(id => id !== targetId);
+        else if (na.cupidPicks.length < 2) na.cupidPicks.push(targetId);
         broadcastRoom(room);
         return;
       }
-      if (actionType === 'confirm_cupid' && g.nightActions.cupidPicks.length === 2) {
-        g.nightActions.submittedBy[player.id] = true;
+      if (actionType === 'confirm_cupid' && na.cupidPicks.length === 2) {
+        na.submittedBy[player.id] = true;
       }
-    } else if (step === 'wolfpack' && isWolfRole(player.role)) {
+    } else if (isWolfRole(player.role)) {
       const maxKills = g.wolfCubRageRound === g.round ? 2 : 1;
       if (actionType === 'toggle_wolf_target') {
-        const list = g.nightActions.wolfTargets;
-        if (list.includes(targetId)) g.nightActions.wolfTargets = list.filter(id => id !== targetId);
-        else { if (list.length >= maxKills) list.shift(); list.push(targetId); }
+        const cur = na.wolfVotesByPlayer[player.id] ? [...na.wolfVotesByPlayer[player.id]] : [];
+        const idx = cur.indexOf(targetId);
+        if (idx >= 0) cur.splice(idx, 1);
+        else { if (cur.length >= maxKills) cur.shift(); cur.push(targetId); }
+        na.wolfVotesByPlayer[player.id] = cur;
+        // Unlock submission if wolf changes target so they can re-confirm
+        delete na.submittedBy[player.id];
         broadcastRoom(room);
         return;
       }
-      if (actionType === 'confirm_wolf' && g.nightActions.wolfTargets.length > 0) {
-        g.nightActions.submittedBy[player.id] = true;
+      if (actionType === 'confirm_wolf') {
+        na.submittedBy[player.id] = true;
       }
-    } else if (step === 'defender' && player.role === 'defender') {
+    } else if (player.role === 'defender') {
       if (targetId === player.protectedLastNight) return;
-      g.nightActions.defenderTargetId = targetId;
-      g.nightActions.submittedBy[player.id] = true;
-    } else if (step === 'seer' && player.role === 'seer') {
-      if (g.nightActions.submittedBy[player.id]) return;
-      const target = room.players.find(p => p.id === targetId);
-      if (!target) return;
-      const fogged = g.currentNightEvent?.id === 'thick_fog';
-      const isDark = isWolfRole(target.role);
-      g.nightActions.seerTargetId = targetId;
-      g.nightActions.seerResult = { targetId, isDark, fogged };
-      g.nightActions.submittedBy[player.id] = true;
-      if (!room.timers.antiMetaFixedNight) g.timerRemaining = Math.min(g.timerRemaining, 4);
-      broadcastRoom(room);
-      return;
-    } else if (step === 'witch' && player.role === 'witch') {
-      if (actionType === 'heal' && !g.nightActions.witchHealUsed && targetId) {
-        g.nightActions.witchHealedId = targetId;
-        g.nightActions.witchHealUsed = true;
+      na.defenderTargetId = targetId;
+      na.submittedBy[player.id] = true;
+    } else if (player.role === 'seer') {
+      if (actionType === 'target' && !na.seerResult) {
+        const target = room.players.find(p => p.id === targetId);
+        if (!target) return;
+        const fogged = g.currentNightEvent?.id === 'thick_fog';
+        const isDark = isWolfRole(target.role);
+        na.seerTargetId = targetId;
+        na.seerResult = { targetId, isDark, fogged };
         broadcastRoom(room);
         return;
       }
-      if (actionType === 'poison' && !g.nightActions.witchPoisonUsed && targetId) {
-        g.nightActions.witchPoisonTargetId = targetId;
-        g.nightActions.witchPoisonUsed = true;
+      if (actionType === 'done_seer' && na.seerResult) {
+        na.submittedBy[player.id] = true;
+      }
+    } else if (player.role === 'witch') {
+      if (actionType === 'heal' && !na.witchHealUsed && targetId) {
+        na.witchHealedId = targetId;
+        na.witchHealUsed = true;
         broadcastRoom(room);
         return;
       }
-      if (actionType === 'done') g.nightActions.submittedBy[player.id] = true;
-    } else if (step === 'spellcaster' && player.role === 'spellcaster') {
-      g.nightActions.spellcasterTargetId = targetId;
-      g.nightActions.submittedBy[player.id] = true;
-    } else if (step === 'revealer' && player.role === 'revealer') {
-      g.nightActions.revealerTargetId = actionType === 'skip' ? null : targetId;
-      g.nightActions.submittedBy[player.id] = true;
-    } else if (step === 'huntress' && player.role === 'huntress') {
-      if (actionType === 'target' && !player.huntressUsed && targetId) {
-        g.nightActions.huntressTargetId = targetId;
+      if (actionType === 'poison' && !na.witchPoisonUsed && targetId) {
+        na.witchPoisonTargetId = targetId;
+        na.witchPoisonUsed = true;
+        broadcastRoom(room);
+        return;
+      }
+      if (actionType === 'done') na.submittedBy[player.id] = true;
+    } else if (player.role === 'spellcaster') {
+      na.spellcasterTargetId = targetId;
+      na.submittedBy[player.id] = true;
+    } else if (player.role === 'revealer') {
+      na.revealerTargetId = actionType === 'skip' ? null : targetId;
+      na.submittedBy[player.id] = true;
+    } else if (player.role === 'huntress' && !player.huntressUsed) {
+      if (actionType === 'target' && targetId) {
+        na.huntressTargetId = targetId;
         player.huntressUsed = true;
       }
-      g.nightActions.submittedBy[player.id] = true;
+      na.submittedBy[player.id] = true;
     }
 
-    if (!room.timers.antiMetaFixedNight) {
-      const actors = getStepActors(room, step);
-      if (actors.every(p => g.nightActions.submittedBy[p.id])) {
-        finalizeNightStep(room, step);
-        return;
-      }
-    }
     broadcastRoom(room);
+    checkNightComplete(room);
   });
 
-  // Voting / Trial / Second Chance / Hunter / Ghost Guess
   socket.on('game:vote', ({ targetId }) => {
     const room = rooms.get(socket.data.roomCode);
     if (!room || room.game.phase !== 'vote') return;
@@ -1250,10 +1244,7 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     const room = rooms.get(socket.data.roomCode);
     if (!room) return;
-    if (socket.data.isTv) {
-      room.tvSockets.delete(socket.id);
-      return;
-    }
+    if (socket.data.isTv) { room.tvSockets.delete(socket.id); return; }
     const player = room.players.find(p => p.id === socket.data.playerId);
     if (player && player.socketId === socket.id) {
       player.socketId = null;
@@ -1262,14 +1253,10 @@ io.on('connection', (socket) => {
   });
 });
 
-// Cleanup stale rooms every 30 minutes
 setInterval(() => {
   const cutoff = Date.now() - 3 * 60 * 60 * 1000;
   for (const [code, room] of rooms.entries()) {
-    if (room.lastActivity < cutoff) {
-      stopRoomTimer(room);
-      rooms.delete(code);
-    }
+    if (room.lastActivity < cutoff) { stopRoomTimer(room); rooms.delete(code); }
   }
 }, 30 * 60 * 1000);
 
@@ -1279,9 +1266,8 @@ server.listen(PORT, '0.0.0.0', () => {
   for (const name of Object.keys(nets)) {
     for (const net of nets[name] || []) {
       if (net.family === 'IPv4' && !net.internal) {
-        console.log(`📱 Local Wi-Fi (ให้เพื่อนเข้าจากมือถือ): http://${net.address}:${PORT}`);
+        console.log(`📱 Local Wi-Fi: http://${net.address}:${PORT}`);
       }
     }
   }
-  console.log('');
 });
